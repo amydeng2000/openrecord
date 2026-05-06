@@ -35,7 +35,7 @@ export async function follow302sAndReturnFinalUrl(url: string): Promise<string> 
 }
 
 
-if (require.main === module) {
+if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) {
   (async () => {
     const url = 'https://mychart.example.org/mychart';
     const finalUrl = await follow302sAndReturnFinalUrl(url);

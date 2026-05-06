@@ -1,0 +1,7 @@
+src/
+examples/
+tsup.config.ts
+tsconfig.json
+node_modules/
+*.log
+.DS_Store

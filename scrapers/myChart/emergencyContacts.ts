@@ -42,7 +42,7 @@ type GetRelationshipsResponse = {
 async function getToken(mychartRequest: MyChartRequest): Promise<string | null> {
   const pageResp = await mychartRequest.makeRequest({ path: '/app/personal-information' });
   const html = await pageResp.text();
-  return getRequestVerificationTokenFromBody(html);
+  return getRequestVerificationTokenFromBody(html) ?? null;
 }
 
 export async function getEmergencyContacts(mychartRequest: MyChartRequest): Promise<EmergencyContact[]> {

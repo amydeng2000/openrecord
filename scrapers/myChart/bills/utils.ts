@@ -61,9 +61,9 @@ function test() {
 }
 
 
-if (require.main === module) {
+if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) {
     test()
-} 
+}
 
 
 

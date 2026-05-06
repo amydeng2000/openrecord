@@ -838,7 +838,7 @@ async function initializeAmfSession(
       'Content-Type': 'application/octet-stream',
       'User-Agent': UA,
     },
-    body: amfReq,
+    body: amfReq as unknown as BodyInit,
   });
 
   if (!res.ok) {
@@ -873,7 +873,7 @@ async function initializeAmfSession(
         'Content-Type': 'application/octet-stream',
         'User-Agent': UA,
       },
-      body: amfReq2,
+      body: amfReq2 as unknown as BodyInit,
     });
 
     if (res2.ok) {
@@ -1459,7 +1459,7 @@ export async function downloadImagingStudyDirect(
     const CLOCLHAAR_MAGIC = Buffer.from('CLOCLHAAR');
     let completed = 0;
 
-    async function downloadOne(series: typeof studyInfo.series[0]): Promise<void> {
+    async function downloadOne(series: NonNullable<typeof studyInfo>['series'][0]): Promise<void> {
       try {
         const { data } = await downloadImage(session!.cookieJar, baseUrl, {
           studyUID: studyInfo!.studyUID,

@@ -232,7 +232,7 @@ async function test() {
 }
 
 
-if (require.main === module) {
+if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) {
   // This script is being run directly
   // We will call the main function
   test()

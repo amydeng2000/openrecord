@@ -1,0 +1,65 @@
+{
+  "name": "mychart-connector",
+  "version": "0.1.0",
+  "description": "Programmatic access to Epic MyChart patient portals: login, scrape every section of a patient's chart, and act on it.",
+  "license": "SEE LICENSE IN LICENSE",
+  "author": "Fan Pier Labs",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Fan-Pier-Labs/mychart-connector",
+    "directory": "npm-package"
+  },
+  "homepage": "https://github.com/Fan-Pier-Labs/mychart-connector/tree/main/npm-package",
+  "keywords": [
+    "mychart",
+    "epic",
+    "ehr",
+    "health",
+    "medical-records",
+    "patient-portal",
+    "scraper"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test src/__tests__/",
+    "prepublishOnly": "bun run build"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "date-fns": "^4.1.0",
+    "fetch-cookie": "^3.1.0",
+    "fzstd": "^0.1.1",
+    "mkdirp": "^3.0.1",
+    "sharp": "^0.34.5",
+    "totp-generator": "^2.0.1",
+    "tough-cookie": "^5.1.2",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.6.0"
+  }
+}
