@@ -115,6 +115,34 @@ export {
   type SeriesInfo,
 } from '../../scrapers/myChart/eunity/imagingDirectDownload';
 
+// ─── CLO image conversion ────────────────────────────────────────────────
+// Turn raw CLO bytes from `downloadImagingStudyDirect` into JPEG / PNG /
+// AVIF / TIFF / WebP. Goes through an intermediate 16-bit Bitmap so callers
+// can apply their own VOI LUT / windowing before encoding if they want.
+export {
+  convertCloToJpg,
+  convertCloToBitmap,
+  convertCloToBitmap16,
+  convertBitmapToJpg,
+  convertBitmapToWebp,
+  convertBitmap16ToJpg,
+  convertBitmap16ToPng,
+  convertBitmap16ToAvif,
+  convertBitmap16ToTiff,
+  convertBitmap16ToWebp,
+  parseWrapper,
+  applyVoiLut,
+  to8bit,
+  to16bit,
+  type Bitmap,
+  type Bitmap16,
+  type CloMetadata,
+  type JpgOptions,
+  type PngOptions,
+  type AvifOptions,
+  type TiffOptions,
+} from '../../scrapers/myChart/clo-image-parser/clo_to_jpg';
+
 // ─── Visits ───────────────────────────────────────────────────────────────
 export { upcomingVisits, pastVisits } from '../../scrapers/myChart/visits/visits';
 

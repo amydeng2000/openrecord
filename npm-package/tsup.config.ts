@@ -52,19 +52,6 @@ export default defineConfig({
   clean: true,
   splitting: false,
   target: 'node18',
-  // Keep heavy runtime deps external — consumers install them once.
-  external: [
-    'cheerio',
-    'tough-cookie',
-    'date-fns',
-    'mkdirp',
-    'totp-generator',
-    'fzstd',
-    'sharp',
-    'uuid',
-    'fetch-cookie',
-    'playwright',
-  ],
   // Bundle the scraper sources into our package so consumers don't depend
   // on the workspace layout.
   noExternal: [/scrapers[\\/]myChart/],
