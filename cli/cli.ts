@@ -54,7 +54,7 @@ import { savePasskeyCredential, loadPasskeyCredential } from './passkeyStore';
 import type { PasskeyCredential } from '../scrapers/myChart/softwareAuthenticator';
 import { sendTelemetryEvent } from '../shared/telemetry';
 import { checkForUpdate } from '../shared/updateCheck';
-import { isBlockedInstance } from '../shared/blockedInstances';
+import { isBlockedInstance } from '../scrapers/myChart/blockedInstances';
 
 // Note: We NEVER modify or delete macOS Keychain entries. Read-only via browser password extraction.
 

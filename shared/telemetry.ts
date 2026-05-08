@@ -1,103 +1,121 @@
 /**
- * Shared telemetry module for server-side / CLI analytics via Amplitude HTTP API.
+ * Anonymous usage telemetry, modelled after Next.js / Vercel CLI:
  *
- * All functions are fire-and-forget and will never throw or block the caller.
+ * - One stable random UUID per project install, stored in the consumer's
+ *   `node_modules/.cache/mychart-connector/anonymous-id` (the same
+ *   convention Babel / ESLint / Webpack use for tooling cache). Never
+ *   derived from identifying information.
+ * - Event payload is event name + properties + OS platform/arch +
+ *   runtime version. No public IP, no OS hostname, no git config.
+ * - Opt out by setting `MYCHART_CONNECTOR_TELEMETRY_DISABLED` to any
+ *   truthy value.
+ *
+ * Fire-and-forget. Never throws, never blocks the caller.
  */
 
 import * as os from 'os';
-import * as crypto from 'crypto';
-import { execSync } from 'child_process';
+import * as path from 'path';
+import * as fs from 'fs';
+import { randomUUID } from 'crypto';
 
 const AMPLITUDE_API_KEY = 'a7d8557f623f24012e62edc61bbc0fd6';
 const AMPLITUDE_HTTP_API = 'https://api2.amplitude.com/2/httpapi';
 
-/** A stable anonymous device ID derived from hostname + username. */
-function getDeviceId(): string {
-  const raw = `${os.hostname()}-${os.userInfo().username}`;
-  return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 32);
+function isTelemetryDisabled(): boolean {
+  return Boolean(process.env.MYCHART_CONNECTOR_TELEMETRY_DISABLED);
 }
 
-/** Read a git config value, returns null on failure. */
-function getGitConfig(key: string): string | null {
+/**
+ * Locate the nearest `node_modules` directory by walking up from
+ * `process.cwd()`. Returns the cache subdirectory we'd use, or `null`
+ * if no `node_modules` is reachable (in which case we won't persist
+ * the anonymous ID at all).
+ */
+function findNodeModulesCacheDir(): string | null {
+  let dir = process.cwd();
+  while (dir !== path.dirname(dir)) {
+    const nm = path.join(dir, 'node_modules');
+    if (fs.existsSync(nm)) {
+      return path.join(nm, '.cache', 'mychart-connector');
+    }
+    dir = path.dirname(dir);
+  }
+  return null;
+}
+
+/**
+ * Read or create a stable random UUID stored on disk. The ID is not
+ * derived from any identifying information; it exists purely to dedupe
+ * events from the same project install.
+ */
+function getAnonymousId(): string {
+  const cacheDir = findNodeModulesCacheDir();
+  if (!cacheDir) {
+    // No node_modules nearby (running from outside any project).
+    // Fall back to a per-process UUID — telemetry still works, just
+    // won't dedupe across runs.
+    return randomUUID();
+  }
+  const idFile = path.join(cacheDir, 'anonymous-id');
   try {
-    return execSync(`git config ${key}`, { encoding: 'utf8', timeout: 2000, stdio: 'pipe' }).trim() || null;
+    if (fs.existsSync(idFile)) {
+      const cached = fs.readFileSync(idFile, 'utf8').trim();
+      if (cached) return cached;
+    }
+    fs.mkdirSync(cacheDir, { recursive: true });
+    const fresh = randomUUID();
+    fs.writeFileSync(idFile, fresh, { encoding: 'utf8', mode: 0o600 });
+    return fresh;
   } catch {
-    return null;
+    // Read-only FS / permission denied — fall back to per-process UUID.
+    return randomUUID();
   }
 }
 
 export interface EnvInfo {
-  public_ip: string | null;
   platform: string;
   arch: string;
   runtime_version: string;
   os_version: string;
-  hostname: string;
-  git_user_name: string | null;
-  git_user_email: string | null;
-  env_user: string | null;
 }
 
-/**
- * Gather environment info (public IP, platform, arch, runtime version, git identity).
- * The public IP fetch has a short timeout so it won't block.
- */
-export async function gatherEnvInfo(): Promise<EnvInfo> {
-  let publicIp: string | null = null;
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch('https://api.ipify.org?format=json', { signal: controller.signal });
-    clearTimeout(timeout);
-    const data = await res.json() as { ip: string };
-    publicIp = data.ip;
-  } catch {
-    // best-effort
-  }
-
+/** Gather non-identifying environment info. */
+export function gatherEnvInfo(): EnvInfo {
   return {
-    public_ip: publicIp,
     platform: os.platform(),
     arch: os.arch(),
-    runtime_version: typeof Bun !== 'undefined' ? `bun ${Bun.version}` : `node ${process.version}`,
+    runtime_version:
+      typeof Bun !== 'undefined' ? `bun ${Bun.version}` : `node ${process.version}`,
     os_version: os.release(),
-    hostname: os.hostname(),
-    git_user_name: getGitConfig('user.name'),
-    git_user_email: getGitConfig('user.email'),
-    env_user: process.env.USER || process.env.USERNAME || null,
   };
 }
 
 /**
  * Send a telemetry event to Amplitude via the HTTP API.
- * Completely non-blocking and fire-and-forget. Never throws.
+ * Fire-and-forget. Never throws. Returns immediately when telemetry is
+ * disabled via `MYCHART_CONNECTOR_TELEMETRY_DISABLED`.
  */
 export function sendTelemetryEvent(
   eventType: string,
   eventProperties: Record<string, unknown> = {},
 ): void {
-  // Fire-and-forget — wrapped in an async IIFE that catches all errors
+  if (isTelemetryDisabled()) return;
+
   void (async () => {
     try {
-      const envInfo = await gatherEnvInfo();
+      const envInfo = gatherEnvInfo();
       const payload = {
         api_key: AMPLITUDE_API_KEY,
         events: [
           {
-            device_id: getDeviceId(),
+            device_id: getAnonymousId(),
             event_type: eventType,
             time: Date.now(),
             platform: envInfo.platform,
             os_name: envInfo.platform,
             os_version: envInfo.os_version,
-            user_properties: {
-              git_user_name: envInfo.git_user_name,
-              git_user_email: envInfo.git_user_email,
-              env_user: envInfo.env_user,
-            },
             event_properties: {
               ...eventProperties,
-              public_ip: envInfo.public_ip,
               arch: envInfo.arch,
               runtime_version: envInfo.runtime_version,
             },
@@ -115,7 +133,7 @@ export function sendTelemetryEvent(
       });
       clearTimeout(timeout);
     } catch {
-      // Silently ignore — telemetry must never break the app
+      // Silently ignore — telemetry must never break the app.
     }
   })();
 }

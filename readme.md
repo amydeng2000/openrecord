@@ -162,6 +162,19 @@ bun run lint                 # ESLint (scrapers + web)
 bun run fix                  # ESLint auto-fix
 ```
 
+## Telemetry
+
+The CLI, web app, and `mychart-connector` npm package send anonymous
+usage events (event name, MyChart portal hostname, OS platform / arch /
+version, runtime version, plus a per-machine random UUID for dedupe).
+No public IP, OS hostname, OS username, git identity, or scraped chart
+content is ever collected. Set
+`MYCHART_CONNECTOR_TELEMETRY_DISABLED=1` to opt out.
+
+A separate dev-mode env var, `OPENRECORD_MOCK_DATA=1`, switches the
+scrapers' HTTP layer over to canned mock responses (was previously
+`MOCK_DATA`; renamed for namespacing). Don't set this in production.
+
 ## License
 
 Proprietary source-available license (see `LICENSE`). Viewing and personal/educational use permitted; no commercial use, redistribution, SaaS offerings, or competing products without written permission from Fan Pier Labs.

@@ -3,10 +3,9 @@ import * as cheerio from 'cheerio';
 
 import fs from 'fs';
 import { getRequestVerificationTokenFromBody } from "./util";
-import { changeDirToPackageRoot } from "../../shared/util";
 import { sendTelemetryEvent } from "../../shared/telemetry";
 import { acceptTermsAndConditions } from "./termsAndConditions";
-import { isBlockedInstance } from "../../shared/blockedInstances";
+import { isBlockedInstance } from "./blockedInstances";
 import { createAssertion, type PasskeyCredential } from "./softwareAuthenticator";
 
 
@@ -831,7 +830,7 @@ async function myChartRawLogin_TEST({hostname, user, pass}: {hostname: string, u
 
 
 export async function login_TEST(hostname: string): Promise<MyChartRequest> {
-
+  const { changeDirToPackageRoot } = await import("../../shared/util");
   await changeDirToPackageRoot()
 
 
@@ -891,6 +890,6 @@ async function test() {
 
 }
 
-if (require.main === module) {
+if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) {
   test()
 }

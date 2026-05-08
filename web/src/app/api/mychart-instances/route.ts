@@ -5,7 +5,7 @@ import { normalizeHostname } from '@/lib/utils';
 import { autoConnectInstance } from '@/lib/mcp/auto-connect';
 import { sessionStore } from '@/lib/sessions';
 import { sendTelemetryEvent } from '../../../../../shared/telemetry';
-import { isBlockedInstance } from '../../../../../shared/blockedInstances';
+import { isBlockedInstance } from '../../../../../scrapers/myChart/blockedInstances';
 
 export async function GET(req: NextRequest) {
   sendTelemetryEvent('api_instances_list');

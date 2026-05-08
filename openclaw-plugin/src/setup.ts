@@ -10,7 +10,7 @@ import { setupPasskey } from '../../scrapers/myChart/setupPasskey';
 import { serializeCredential } from '../../scrapers/myChart/softwareAuthenticator';
 import { browserPasswordDbExists, importMyChartAccounts } from './password-import';
 import { clearSession, clearAllSessions, clearActiveAccount, resolveSession } from './index';
-import { isBlockedInstance } from '../../shared/blockedInstances';
+import { isBlockedInstance } from '../../scrapers/myChart/blockedInstances';
 import {
   readAccounts, addAccount, removeAccount, saveAccounts,
   readAccountPasskey, saveAccountPasskey, clearAccountPasskey, clearAllPasskeys,
