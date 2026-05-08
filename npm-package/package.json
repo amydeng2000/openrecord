@@ -33,6 +33,9 @@
       "require": "./dist/index.cjs"
     }
   },
+  "bin": {
+    "mychart-connector": "./dist/cli.cjs"
+  },
   "sideEffects": false,
   "files": [
     "dist",
