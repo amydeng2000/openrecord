@@ -44,6 +44,83 @@ console.log(profile, meds);
 client.close();   // stops the background keepalive timer
 ```
 
+## Recommended: use a passkey for fully-automated auth
+
+Username + password isn't a great fit for unattended automation: most
+MyChart instances enforce 2FA, which means a human has to type a code
+every login. **Use a passkey instead.** A passkey is a public/private
+keypair MyChart trusts the same way it trusts the 2FA flow — once
+registered, your code can log in with no prompts and no 2FA.
+
+The recommended workflow:
+
+**1. One-time setup (interactive, via the CLI).** Log in once with
+username + password + 2FA, then ask MyChart to register a new passkey
+on the account:
+
+```bash
+# In this repo:
+bun run cli mychart --host mychart.example.org --set-up-passkey
+```
+
+The CLI walks the password + 2FA flow once, registers a new passkey
+(via the same WebAuthn dance the official MyChart app uses), and writes
+the credential to disk. Copy that file somewhere your automation can
+read — it's the only thing you'll need from now on.
+
+**2. All future runs (no human in the loop).** Load the saved
+credential and call `connectWithPasskey`:
+
+```ts
+import {
+  MyChartClient,
+  deserializeCredential,
+  serializeCredential,
+} from 'mychart-connector';
+import * as fs from 'node:fs/promises';
+
+const credential = deserializeCredential(
+  await fs.readFile('./passkey.json', 'utf8'),
+);
+
+const result = await MyChartClient.connectWithPasskey({
+  hostname: 'mychart.example.org',
+  credential,
+});
+if (result.state !== 'connected') throw new Error('passkey login failed');
+const client = result.client;
+
+// IMPORTANT: passkeys mutate on use — see below.
+await fs.writeFile('./passkey.json', serializeCredential(credential));
+
+const meds = await client.getMedications();
+client.close();
+```
+
+> [!IMPORTANT]
+> **The passkey is not a static key — its `signCount` increments every
+> time you log in.** WebAuthn requires the counter to monotonically
+> increase across logins; if you replay the *same* credential bytes
+> twice, MyChart will reject the second attempt as a possible cloned
+> authenticator. After every successful `connectWithPasskey` call you
+> **must** re-serialize the credential and overwrite the file on disk.
+> The example above does exactly this.
+>
+> Concretely: load → use → re-save. Don't bake the passkey into a Docker
+> image, a `process.env`, or anything else immutable. Treat it like a
+> rotating session token that you persist back after every use.
+
+**Other passkey tools** (also exported from the package, take
+`client.request` as the first argument):
+
+```ts
+import { setupPasskey, listPasskeys, deletePasskey } from 'mychart-connector';
+
+const credential = await setupPasskey(client.request);   // register a new one programmatically
+const list       = await listPasskeys(client.request);   // audit what's on the account
+await deletePasskey(client.request, rawId);              // revoke one
+```
+
 ## What you get
 
 - **One method per scraper.** `client.getProfile()`, `client.getMedications()`,
