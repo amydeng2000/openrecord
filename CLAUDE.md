@@ -17,7 +17,7 @@ Proprietary source-available license (see `LICENSE`). Viewing and personal/educa
 - **CLO image parser** (`scrapers/myChart/clo-image-parser/`): eUnity CLO image format decoder and encoder
 - **Web app** (`web/`): Next.js demo app deployed to AWS Fargate. Includes an mcp server. Uses BetterAuth for user authentication (email+password, Google OAuth) and PostgreSQL for storing encrypted MyChart credentials.
 - **OpenRecord plugin** (`openclaw-plugin/`): Self-contained OpenClaw plugin (package name: `openrecord`) that bundles all MyChart scrapers locally. No server dependency.
-- **Fake MyChart** (`fake-mychart/`): Standalone Next.js app that mimics MyChart's API surface with Homer Simpson fake data. Used for development without real MyChart access and CI integration tests. Run with `cd fake-mychart && bun run dev` (port 4000). Credentials: `homer`/`donuts123` (or set `FAKE_MYCHART_ACCEPT_ANY=true`). All state lives in RAM. Supports the full login flow including 2FA (code `123456`).
+- **Fake MyChart** (`fake-mychart/`): Standalone Next.js app that mimics MyChart's API surface with Homer Simpson fake data. Used for development without real MyChart access and CI integration tests. Run with `cd fake-mychart && bun run dev` (port 4000). Credentials: `homer`/`donuts123` (no 2FA) or `marge`/`donuts123` (TOTP enabled — always requires the 2FA code `123456`). Set `FAKE_MYCHART_ACCEPT_ANY=true` to accept any username/password. All state lives in RAM. Visit `/reset` (or `POST /reset`) to wipe all in-memory state — sessions, sent messages, emergency contacts, per-user TOTP/passkeys, booked appointments — back to the seed.
 
 ## Key Commands
 
@@ -79,6 +79,11 @@ The web app supports two deployment modes, auto-detected via the `DATABASE_URL` 
   - Uses the `deploy` package (dev dependency) which builds a Docker image, pushes to ECR, and deploys to ECS Fargate
   - Config: `web/deploy.yaml`
   - Domain: `openrecord.fanpierlabs.com` (CloudFront + ALB + Route53). Old domain `mychart.fanpierlabs.com` redirects via next.config.ts.
+  - Region: `us-east-2`
+- **Fake MyChart** (`fake-mychart/`): Separate Fargate app deployed independently from the web app. **Run the deploy script from inside `fake-mychart/`** so the relative `Dockerfile` path resolves to `fake-mychart/Dockerfile` (not the repo-root web app Dockerfile):
+  - `cd fake-mychart && python3 ../node_modules/deploy/main.py --config deploy.yaml`
+  - Config: `fake-mychart/deploy.yaml`
+  - Domain: `fake-mychart.fanpierlabs.com` (its own ALB + ECS service `fake-mychart-service` in cluster `fake-mychart-cluster`)
   - Region: `us-east-2`
 
 ### Railway / Self-Hosted
@@ -217,9 +222,89 @@ You maintain persistent memory in markdown files at `claude-memory/` in the repo
 - Keep MEMORY.md concise — use separate files for detailed notes
 - Organize by topic, not chronologically
 
+## iOS Simulator Debugging & UI Automation
+
+Use **`maestro-cli`** (already installed at `~/.local/bin/maestro-cli`) for every interaction with the iOS simulator. It's a one-shot wrapper around Maestro (mobile.dev) designed for agent loops — each invocation does one action and writes a screenshot to `/tmp/maestro-last.png` so the next step can read it.
+
+**Hard rules (no exceptions):**
+- **NEVER take over the user's mouse.** Do not use `cliclick`, `osascript ... click at`, AppleScript mouse events, AppKit/CGEvent, or any other tool that moves the cursor or steals focus. The user may be using their computer.
+- **NEVER click on the simulator by computing pixel coordinates against the simulator window position.** It's brittle, focus-races with whatever the user is doing, and breaks on every window move or sim resize. Use `maestro-cli` instead — it talks to the simulator through iOS's native automation hooks, not the macOS cursor.
+- **Do not install a separate Maestro.** The brew `maestro` cask is a different product (runmaestro.ai). The mobile.dev Maestro CLI is what `maestro-cli` wraps and it's already on PATH.
+
+### Starting a sim session (do this exactly once per Claude session)
+
+Every Claude session that touches the simulator must own a fresh, dedicated sim — never share one with another running Claude. The recipe:
+
+```bash
+# 1. Create a new simulator. simctl assigns a UDID and prints it.
+UDID=$(xcrun simctl create "claude-$(date +%Y%m%d)-$(openssl rand -hex 3)" \
+  "iPhone 17" \
+  "com.apple.CoreSimulator.SimRuntime.iOS-26-1")
+
+# 2. Boot it and surface the Simulator.app window so the user can watch.
+xcrun simctl boot "$UDID"
+open -a Simulator
+
+# 3. Pin the UDID for the rest of the session. The Bash tool's shell state
+#    persists across tool calls, so this one export is enough — every later
+#    maestro-cli invocation picks it up automatically.
+export MAESTRO_UDID="$UDID"
+
+# 4. Build + install + launch the Expo app on this exact sim.
+cd expo-app && bunx expo run:ios --device "$UDID" --port 8083 &
+```
+
+Notes:
+- The UDID is CoreSimulator-assigned, not Claude-generated. Capture it from `simctl create`'s stdout.
+- Naming pattern `claude-<date>-<random>` makes orphaned sims easy to spot and bulk-delete: `xcrun simctl delete $(xcrun simctl list devices | grep -E 'claude-[0-9]{8}-' | grep -oE '[A-F0-9-]{36}')`.
+- Use a port other than 8081 if other Claude instances are running their own Metro on the default port. Pick deterministically (8082, 8083, …) and pass `--port` to `expo run:ios`.
+- At end of session: `xcrun simctl shutdown "$MAESTRO_UDID" && xcrun simctl delete "$MAESTRO_UDID"`. Leave it running only if the user explicitly wants to keep it.
+
+**Common commands** (full reference: `maestro-cli --help`):
+
+```
+maestro-cli tap "Get Started"         # tap by visible text or regex
+maestro-cli tap-id run-skill-button   # tap by testID — preferred when set
+maestro-cli type "homer"              # type into focused field
+maestro-cli fill "Username" "homer"   # tap a field by label, then type
+maestro-cli press Enter               # hardware/keyboard key
+maestro-cli scroll down               # screen scroll
+maestro-cli wait "Run a skill"        # block until text appears
+maestro-cli assert-visible "Insights" # fail if missing
+maestro-cli screenshot [path]         # /tmp/maestro-last.png by default
+maestro-cli hierarchy                 # dump a11y tree (great for finding testIDs)
+maestro-cli launch / stop             # relaunch / terminate app
+maestro-cli reset-keychain            # wipe sim keychain (forgets logins/setup_complete)
+```
+
+Env vars:
+- `MAESTRO_APP_ID` — bundle id (default `com.fanpierlabs.openrecord`).
+- `MAESTRO_UDID` — **REQUIRED.** iOS simulator UDID. `maestro-cli` will exit non-zero immediately if this is unset. There's no fallback, on purpose — multiple Claude sessions run in parallel and a default would let one agent silently drive another agent's sim.
+
+Find UDIDs with `xcrun simctl list devices booted`. Then either:
+
+```
+export MAESTRO_UDID=4C4A3949-7F06-4335-BFE4-DBBB8B183DFD  # session-wide
+maestro-cli tap "Get Started"
+```
+
+or pass per-command:
+
+```
+MAESTRO_UDID=4C4A3949-… maestro-cli tap "Get Started"
+```
+
+**Every interactive element in the Expo app MUST have a testID so `maestro-cli tap-id` works deterministically.**
+
+- React Native: set `testID` AND `accessibilityLabel` on every `Pressable`, `Button`, `TextInput`, `Switch`, and tappable `View`. `testID` is the primary handle for Maestro; `accessibilityLabel` is what VoiceOver reads (also a fallback for `maestro-cli tap` by text).
+- Use a stable, kebab- or snake-case `testID` that describes what the element does, not where it sits. Examples: `get-started-button`, `onboarding-continue`, `skill-bill_itemization`, `chat-input`, `send-message`.
+- For lists of items (chats, insights, skills), include the row id in the `testID` (e.g. `chat-row-${chatId}`) so flows can target a specific row.
+- When you add a new screen or button as part of a feature, add the `testID` in the same diff. PRs that introduce new untargetable UI should be rejected at review.
+
 ## Rules
 
 - **NEVER modify or delete anything from the macOS Keychain or the browser keychain.** Read-only access is OK.
+- **NEVER make changes in AWS without explicit user direction.** No `aws ... create-*`, `delete-*`, `update-*`, `put-*`, ECS service updates, ALB/target-group/listener changes, IAM edits, Secrets Manager writes, RDS modifications, S3 deletes, CloudFront invalidations, etc. Read-only AWS calls (`describe-*`, `list-*`, `get-*`, `sts get-caller-identity`) are fine. Running the official deploy scripts (`bun run deploy` for the web app, `cd fake-mychart && python3 ../node_modules/deploy/main.py --config deploy.yaml` for fake-mychart) is also fine when the user has asked you to deploy. If a deploy script fails partway and leaves orphan/inconsistent AWS resources, **stop and ask** before cleaning them up.
 - **NEVER use `git stash`.** If you're considering stashing changes, stop and ask the user first.
 - **NEVER upload PII to git or GitHub.** Before committing, review all staged changes to ensure no personally identifiable information (names, emails, phone numbers, addresses, dates of birth, medical record numbers, patient IDs, health data, credentials, API keys, or any other sensitive data) is included. If PII is found in code, test fixtures, logs, or output files, remove or redact it before committing. **Body parts, diagnoses, procedures, dates of medical events, and medical details extracted from real patient data also count as PII** — do not include specific body parts (e.g., "shoulder"), procedure names (e.g., "arthrogram"), series descriptions from real imaging studies, or when specific scans/procedures were performed (e.g., "MRI was done on 1/1") in commit messages, PR descriptions, documentation examples, or code comments. Use generic examples instead.
 - **NEVER use `dangerouslySetInnerHTML`.** All HTML from external sources (MyChart API responses, scraped content) must be sanitized with DOMPurify before rendering. Use the `SafeHtml` component from `web/src/components/SafeHtml.tsx` which wraps the `sanitizeHtml()` utility. This is a health data app — XSS is unacceptable.
