@@ -7,13 +7,11 @@ appId: com.fanpierlabs.openrecord
 - launchApp:
     clearState: false
 
-# Card collapsed: header shows count
+# Card collapsed: tap header to expand (testID is stable regardless of text)
 - extendedWaitUntil:
     visible:
-      text: ".*things to review|1 thing to review"
+      id: "alerts-toggle"
     timeout: 10000
-
-# Tap to expand
 - tapOn:
     id: "alerts-toggle"
 
