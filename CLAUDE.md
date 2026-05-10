@@ -17,7 +17,7 @@ Proprietary source-available license (see `LICENSE`). Viewing and personal/educa
 - **CLO image parser** (`scrapers/myChart/clo-image-parser/`): eUnity CLO image format decoder and encoder
 - **Web app** (`web/`): Next.js demo app deployed to AWS Fargate. Includes an mcp server. Uses BetterAuth for user authentication (email+password, Google OAuth) and PostgreSQL for storing encrypted MyChart credentials.
 - **OpenRecord plugin** (`openclaw-plugin/`): Self-contained OpenClaw plugin (package name: `openrecord`) that bundles all MyChart scrapers locally. No server dependency.
-- **Fake MyChart** (`fake-mychart/`): Standalone Next.js app that mimics MyChart's API surface with Homer Simpson fake data. Used for development without real MyChart access and CI integration tests. Run with `cd fake-mychart && bun run dev` (port 4000). Credentials: `homer`/`donuts123` (or set `FAKE_MYCHART_ACCEPT_ANY=true`). All state lives in RAM. Supports the full login flow including 2FA (code `123456`).
+- **Fake MyChart** (`fake-mychart/`): Standalone Next.js app that mimics MyChart's API surface with Homer Simpson fake data. Used for development without real MyChart access and CI integration tests. Run with `cd fake-mychart && bun run dev` (port 4000). Credentials: `homer`/`donuts123` (no 2FA) or `marge`/`donuts123` (TOTP enabled — always requires the 2FA code `123456`). Set `FAKE_MYCHART_ACCEPT_ANY=true` to accept any username/password. All state lives in RAM. Visit `/reset` (or `POST /reset`) to wipe all in-memory state — sessions, sent messages, emergency contacts, per-user TOTP/passkeys, booked appointments — back to the seed.
 
 ## Key Commands
 
