@@ -9,7 +9,10 @@ export interface ToolDefinition {
 // ── Reusable schema fragments ──
 
 const instanceParam = {
-  instance: z.string().optional().describe('MyChart hostname (required if multiple accounts connected)'),
+  instance: z.string().optional().describe(
+    'MyChart hostname, or "hostname:username" when multiple accounts share a hostname. ' +
+    'Required if multiple accounts are connected.'
+  ),
 };
 
 const paginatedParams = {
@@ -29,22 +32,33 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'connect_instance',
-    description: 'Connect to a MyChart instance by hostname. Auto-completes 2FA if TOTP is configured.',
-    inputSchema: { instance: z.string().describe('MyChart hostname to connect to') },
+    description: 'Connect to a MyChart instance. Auto-completes 2FA if TOTP is configured. Pass "hostname:username" to disambiguate when multiple accounts share a hostname.',
+    inputSchema: {
+      instance: z.string().describe(
+        'MyChart hostname to connect to, or "hostname:username" if multiple accounts share a hostname.'
+      ),
+    },
   },
   {
     name: 'check_session',
-    description: 'Check current session status and hostname for a MyChart instance',
-    inputSchema: { instance: z.string().optional().describe('MyChart hostname (checks all if omitted)') },
+    description: 'Check current session status for a MyChart instance. Pass "hostname:username" to disambiguate when multiple accounts share a hostname.',
+    inputSchema: {
+      instance: z.string().optional().describe(
+        'MyChart hostname, or "hostname:username" when multiple accounts share a hostname. ' +
+        'Checks all accounts if omitted.'
+      ),
+    },
   },
 
   // Auth tools
   {
     name: 'complete_2fa',
-    description: 'Complete 2FA verification for a MyChart instance. Pass the 2FA code and instance hostname.',
+    description: 'Complete 2FA verification for a MyChart instance. Pass the 2FA code and instance hostname (or "hostname:username" to disambiguate when multiple accounts share a hostname).',
     inputSchema: {
       code: z.string(),
-      instance: z.string().describe('MyChart hostname requiring 2FA'),
+      instance: z.string().describe(
+        'MyChart hostname requiring 2FA, or "hostname:username" if multiple accounts share a hostname.'
+      ),
     },
   },
 
@@ -81,6 +95,33 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: {
       years_back: z.number().optional(),
       ...instanceParam,
+    },
+  },
+  {
+    name: 'get_visit_notes',
+    description: 'List clinical notes (operative notes, anesthesia notes, progress notes, etc.) attached to a past visit. Returns each note\'s hnoId/hnoDat plus a shared lrpId used to fetch individual note content with get_note_content. Use get_past_visits first to get the CSN.',
+    inputSchema: {
+      ...instanceParam,
+      csn: z.string().describe('Visit CSN (encounter ID) from get_past_visits'),
+    },
+  },
+  {
+    name: 'get_note_content',
+    description: 'Fetch the rendered HTML content of a single clinical note. Requires the csn, lrpId, hnoId, and hnoDat from get_visit_notes.',
+    inputSchema: {
+      ...instanceParam,
+      csn: z.string().describe('Visit CSN (encounter ID)'),
+      lrp_id: z.string().describe('Linked report pointer ID from get_visit_notes (shared by all notes in the visit)'),
+      hno_id: z.string().describe('Specific note ID from get_visit_notes'),
+      hno_dat: z.string().describe('Note date token from get_visit_notes'),
+    },
+  },
+  {
+    name: 'get_visit_avs',
+    description: 'Fetch the After Visit Summary (AVS) HTML for a past visit. Returns the full discharge/visit summary with instructions, medications, and follow-up info. Use get_past_visits first to get the CSN.',
+    inputSchema: {
+      ...instanceParam,
+      csn: z.string().describe('Visit CSN (encounter ID) from get_past_visits'),
     },
   },
   {
