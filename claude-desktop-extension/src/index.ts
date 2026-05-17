@@ -1,4 +1,20 @@
 #!/usr/bin/env node
+// Stdio MCP transport requires stdout be ONLY JSON-RPC messages — anything
+// else corrupts the framing and the host (Claude Desktop) reports
+// "Unexpected token X is not valid JSON". The scrapers / login code use
+// console.log freely for human-readable progress messages, so reroute every
+// such call to stderr BEFORE any scraper module is imported.
+//
+// Console method lookups are dynamic (`console.log` is resolved at call
+// time, not at import time), so this rebinding affects all later callers
+// regardless of when they were imported.
+/* eslint-disable @typescript-eslint/no-explicit-any */
+(console as any).log = console.error;
+(console as any).info = console.error;
+(console as any).debug = console.error;
+(console as any).warn = console.error;
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
 /**
  * OpenRecord MCPB — Claude Desktop Extension entry point.
  *
