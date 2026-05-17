@@ -24,18 +24,23 @@ async function main(): Promise<void> {
       version: '0.1.0',
     },
     {
-      capabilities: {
-        tools: {},
-        // Required so Claude Desktop knows the server may send
-        // elicitation/create requests during a tool call.
-        elicitation: {},
-      },
+      capabilities: { tools: {} },
       instructions:
         'OpenRecord connects this conversation to the user\'s MyChart patient portal. ' +
-        'If the user has not set up an account yet, call setup_account — it walks them through ' +
-        'picking their MyChart, signing in, completing 2FA, and registering a passkey for ' +
-        'passwordless future logins. After setup, every other tool just works: get_medications, ' +
-        'get_lab_results, get_messages, send_message, request_refill, etc.',
+        '\n\n' +
+        'EVERY data tool requires an `account` parameter — the MyChart hostname returned by ' +
+        'list_accounts. If you do not already know which account to use, call list_accounts ' +
+        'first. Multiple accounts can be active at once; just pass a different `account` per call.' +
+        '\n\n' +
+        'Setup flow (no MCP elicitation needed — runs as ordinary tool calls + chat prompts):' +
+        '\n  1. Call list_accounts. If the user\'s MyChart is already there, skip to step 5.' +
+        '\n  2. Ask the user for their health system name. Call search_mycharts(query) to find the hostname.' +
+        '\n  3. Ask the user for their MyChart username and password.' +
+        '\n  4. Call setup_account(hostname, username, password). On `need_2fa`, ask the user for the ' +
+        '     6-digit code, then call complete_2fa(pending_id, code). On `invalid_login`, ask again.' +
+        '\n  5. (Recommended) Call register_passkey(account) so future logins skip the password + 2FA.' +
+        '\n  6. Use the data tools (get_medications, get_lab_results, send_message, etc.) with the ' +
+        '     `account` from the previous step.',
     },
   );
 

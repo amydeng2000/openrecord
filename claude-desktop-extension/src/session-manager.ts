@@ -2,13 +2,14 @@
  * Multi-account session manager for the OpenRecord MCPB.
  *
  * - One `MyChartRequest` per hostname, kept warm via keepalive pings.
- * - On first use: try saved passkey, fall back to saved user/pass + TOTP (if any).
+ * - On first use: try the on-disk cookie cache, then a saved passkey, then
+ *   the saved password (+ TOTP if configured).
  * - Auto-recovers from expiry by re-running login on the next call.
  * - Persists cookie state to disk after login so a Claude Desktop restart
  *   doesn't force a fresh login.
  *
- * Mirrors the model in openclaw-plugin/src/index.ts:62-258 but bound to
- * the MCPB's own credential-store rather than the OpenClaw config file.
+ * Multiple accounts can be active simultaneously — every call carries an
+ * explicit hostname, so there is no "active account" state to track.
  */
 
 import { MyChartRequest } from '../../scrapers/myChart/myChartRequest';
@@ -46,24 +47,11 @@ interface SessionEntry {
 
 const sessions = new Map<string, SessionEntry>();
 const loginLocks = new Map<string, Promise<MyChartRequest>>();
-let activeAccountHostname: string | null = null;
 
 const KEEPALIVE_INTERVAL_MS = 30_000;
 const KEEPALIVE_MAX_ERRORS = 3;
 
-// ── Active account selection ────────────────────────────────────────────────
-
-export function setActiveAccount(hostname: string): void {
-  activeAccountHostname = normalizeHostname(hostname);
-}
-
-export function getActiveAccount(): string | null {
-  return activeAccountHostname;
-}
-
-export function clearActiveAccount(): void {
-  activeAccountHostname = null;
-}
+// ── Inspection ──────────────────────────────────────────────────────────────
 
 export function isConnected(hostname: string): boolean {
   const entry = sessions.get(normalizeHostname(hostname));
@@ -86,7 +74,7 @@ export function clearAllSessions(): void {
   loginLocks.clear();
 }
 
-// ── Login (passkey → user/pass + optional TOTP) ─────────────────────────────
+// ── Login (cookie cache → passkey → user/pass + optional TOTP) ──────────────
 
 /**
  * Try to restore a session from the on-disk cookie cache. Returns null if
@@ -109,13 +97,10 @@ async function tryRestoreSession(hostname: string): Promise<MyChartRequest | nul
 async function loginAccount(account: AccountConfig): Promise<MyChartRequest> {
   const hostname = normalizeHostname(account.hostname);
 
-  // 0. Try on-disk cookie cache first
   const restored = await tryRestoreSession(hostname);
   if (restored) return restored;
 
   const passkeySerialized = readAccountPasskey(hostname);
-
-  // 1. Passkey (skips 2FA)
   if (passkeySerialized) {
     try {
       const credential = deserializeCredential(passkeySerialized);
@@ -133,7 +118,6 @@ async function loginAccount(account: AccountConfig): Promise<MyChartRequest> {
     }
   }
 
-  // 2. Username + password (+ TOTP if configured)
   const userPass = await myChartUserPassLogin({
     hostname,
     user: account.username,
@@ -170,7 +154,7 @@ async function loginAccount(account: AccountConfig): Promise<MyChartRequest> {
   throw new Error(`Login failed for ${hostname}: ${userPass.state}${userPass.error ? ` — ${userPass.error}` : ''}`);
 }
 
-async function persistSession(hostname: string, req: MyChartRequest): Promise<void> {
+export async function persistSession(hostname: string, req: MyChartRequest): Promise<void> {
   try {
     saveAccountSession(hostname, await req.serialize());
   } catch (err) {
@@ -178,7 +162,7 @@ async function persistSession(hostname: string, req: MyChartRequest): Promise<vo
   }
 }
 
-// ── Per-account session lifecycle (keepalive + lazy login) ──────────────────
+// ── Session lifecycle (keepalive + lazy login) ──────────────────────────────
 
 async function ensureAccountSession(account: AccountConfig): Promise<MyChartRequest> {
   const key = normalizeHostname(account.hostname);
@@ -240,42 +224,62 @@ async function ensureAccountSession(account: AccountConfig): Promise<MyChartRequ
 }
 
 /**
- * Get a logged-in MyChartRequest for a specific hostname (if provided) or
- * the auto-selected account (single account → that one; multiple connected
- * → active account; otherwise error asking the agent to pick one).
+ * Get a logged-in MyChartRequest for the given hostname. Throws if no
+ * account is configured for that hostname.
  */
-export async function resolveSession(hostname?: string): Promise<MyChartRequest> {
-  const accounts = readAccounts();
-  if (accounts.length === 0) {
-    throw new Error('No MyChart accounts configured. Use the setup_account tool to add one.');
+export async function resolveSession(hostname: string): Promise<MyChartRequest> {
+  if (!hostname) {
+    throw new Error('account is required. Call list_accounts to see configured account IDs, then pass the hostname as `account`.');
   }
+  const account = findAccount(hostname);
+  if (!account) {
+    const available = readAccounts().map(a => a.hostname);
+    throw new Error(
+      available.length === 0
+        ? `No MyChart accounts configured. Call setup_account first.`
+        : `Account "${hostname}" is not configured. Configured accounts: ${available.join(', ')}.`,
+    );
+  }
+  return ensureAccountSession(account);
+}
 
-  if (hostname) {
-    const found = findAccount(hostname);
-    if (!found) {
-      const available = accounts.map(a => a.hostname).join(', ');
-      throw new Error(`Account '${hostname}' not found. Available: ${available}`);
+/**
+ * Adopt an already-logged-in session (e.g. produced by setup_account or
+ * complete_2fa) into the session manager so subsequent tool calls reuse
+ * the cookies + benefit from keepalive.
+ */
+export async function adoptSession(hostname: string, session: MyChartRequest): Promise<void> {
+  const key = normalizeHostname(hostname);
+  clearSession(key);
+  await persistSession(key, session);
+
+  const newEntry: SessionEntry = {
+    session,
+    expired: false,
+    keepAliveCounter: 0,
+    keepAliveErrorCount: 0,
+    keepAliveInterval: null,
+  };
+  newEntry.keepAliveInterval = setInterval(async () => {
+    if (newEntry.expired) return;
+    newEntry.keepAliveCounter++;
+    try {
+      const a = await session.makeRequest({ path: `/Home/KeepAlive?cnt=${newEntry.keepAliveCounter}`, followRedirects: false });
+      const aBody = await a.text();
+      if (aBody.trim() === '0' || a.status !== 200) {
+        newEntry.expired = true;
+        clearAccountSession(key);
+      } else {
+        newEntry.keepAliveErrorCount = 0;
+      }
+    } catch {
+      newEntry.keepAliveErrorCount++;
+      if (newEntry.keepAliveErrorCount >= KEEPALIVE_MAX_ERRORS) {
+        newEntry.expired = true;
+        newEntry.keepAliveErrorCount = 0;
+        clearAccountSession(key);
+      }
     }
-    return ensureAccountSession(found);
-  }
-
-  if (accounts.length === 1) {
-    return ensureAccountSession(accounts[0]);
-  }
-
-  // Multiple accounts — prefer the active one
-  if (activeAccountHostname) {
-    const active = findAccount(activeAccountHostname);
-    if (active) return ensureAccountSession(active);
-  }
-
-  // Try to auto-connect everything; if exactly one ends up reachable, use it
-  await Promise.all(accounts.map(a => ensureAccountSession(a).catch(() => null)));
-  const connected = accounts.filter(a => isConnected(a.hostname));
-  if (connected.length === 1) return ensureAccountSession(connected[0]);
-
-  throw new Error(
-    `Multiple MyChart accounts configured (${accounts.map(a => a.hostname).join(', ')}). ` +
-    `Use select_account to pick one before calling other tools.`,
-  );
+  }, KEEPALIVE_INTERVAL_MS);
+  sessions.set(key, newEntry);
 }

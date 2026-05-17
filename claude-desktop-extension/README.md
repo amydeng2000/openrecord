@@ -21,21 +21,25 @@ After installing, open a new Claude chat and say:
 
 > Set up my MyChart.
 
-Claude calls the `setup_account` tool, which walks you through a guided form:
+Claude walks through a setup sequence using ordinary tool calls (works in
+Claude Desktop, Claude.ai web, and any other MCP client):
 
-1. **Pick your MyChart** — type a few letters of your health system's name
-   (e.g. "uchealth", "mass general") or paste the full mychart.* hostname.
-2. **Username + password** — enter your credentials. They're stored locally
-   in `~/.openrecord-mcpb/` on your machine. Never sent to Anthropic.
-3. **2FA** (if your account requires it) — enter the 6-digit code MyChart
-   sends to your email/SMS.
-4. **Passkey** — opt in (recommended) and future logins skip the password
-   and 2FA prompts entirely.
+1. **`search_mycharts`** — Claude asks you for your health system name (e.g.
+   "uchealth", "mass general") and looks up the hostname.
+2. **`setup_account(hostname, username, password)`** — Claude asks you for
+   your credentials in chat, then logs in. Credentials are stored locally in
+   `~/.openrecord-mcpb/` on your machine. Never sent to Anthropic.
+3. **`complete_2fa(pending_id, code)`** — if MyChart requires 2FA, Claude
+   asks you for the 6-digit code.
+4. **`register_passkey(account)`** — (optional, recommended) future logins
+   skip the password and 2FA prompts entirely.
 
-After setup, every other tool just works:
+After setup, every data tool takes a required `account` parameter (the
+MyChart hostname returned by `list_accounts`). Multiple accounts can be
+active at the same time — just pass a different `account` per call.
 
-> What's my next appointment?
-> Refill my lisinopril.
+> What's my next appointment at uchealth?
+> Refill my lisinopril (use my mass general account).
 > Send a message to Dr. Smith asking about my latest blood pressure reading.
 > Show me my last imaging study.
 

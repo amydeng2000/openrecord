@@ -2,18 +2,29 @@
  * Tool registry for the OpenRecord MCPB stdio MCP server.
  *
  * Two groups of tools:
- *   1. Meta tools  — setup_account, list_accounts, disconnect_account, select_account.
+ *   1. Meta tools — list_accounts, search_mycharts, setup_account, complete_2fa,
+ *                   register_passkey, disconnect_account.
  *   2. Scraper tools — one per MyChart data category + write actions.
  *
- * Every scraper tool accepts an optional `account` (hostname) parameter; if
- * omitted and exactly one account is configured, that one is auto-selected.
- * If multiple are configured and no `account` is given, the tool errors and
- * tells the agent to call `select_account` first.
+ * Every scraper tool takes a REQUIRED `account` parameter (the MyChart
+ * hostname returned by list_accounts). Multiple accounts can be configured
+ * and connected at once; there is no "active account" state.
+ *
+ * Setup is a sequence of explicit tool calls (no MCP elicitation):
+ *   list_accounts                                  // see what's already set up
+ *   search_mycharts(query="uchealth")              // find the hostname for a new account
+ *   setup_account(hostname, username, password)    // attempt login
+ *   complete_2fa(pending_id, code)                 // only if setup_account said need_2fa
+ *   register_passkey(account)                      // optional: skip 2FA on future sessions
  */
 
 import { z, type ZodRawShape } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { MyChartRequest } from '../../scrapers/myChart/myChartRequest';
+
+import { myChartUserPassLogin, complete2faFlow } from '../../scrapers/myChart/login';
+import { setupPasskey } from '../../scrapers/myChart/setupPasskey';
+import { serializeCredential } from '../../scrapers/myChart/softwareAuthenticator';
 
 import { getMyChartProfile, getEmail } from '../../scrapers/myChart/profile';
 import { getHealthSummary } from '../../scrapers/myChart/healthSummary';
@@ -61,24 +72,28 @@ import { requestMedicationRefill } from '../../scrapers/myChart/medicationRefill
 import { downloadImagingStudyDirect } from '../../scrapers/myChart/eunity/imagingDirectDownload';
 import { convertCloToBitmap16 } from '../../scrapers/myChart/clo-image-parser/clo_to_bitmap';
 
-import { runSetupFlow } from './setup-flow';
+import { searchInstances, findByHostname } from './instances';
 import {
   resolveSession,
   isConnected,
-  setActiveAccount,
-  getActiveAccount,
   clearSession,
+  adoptSession,
 } from './session-manager';
 import {
   readAccounts,
   readAccountPasskey,
   removeAccount,
+  upsertAccount,
+  saveAccountPasskey,
+  normalizeHostname,
+  findAccount,
 } from './credential-store';
+import { addPending, takePending } from './pending-logins';
 import { encodeCloAsJpeg } from './imaging/jpeg-encoder';
 
 // ── Result helpers ──────────────────────────────────────────────────────────
 
-type ToolContent = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
+type ToolContent = { type: 'text'; text: string };
 type ToolResult = { content: ToolContent[]; isError?: boolean };
 
 function jsonResult(data: unknown): ToolResult {
@@ -98,31 +113,27 @@ function errorResult(message: string): ToolResult {
 type ScraperHandler<Args> = (req: MyChartRequest, args: Args) => Promise<unknown>;
 
 /**
- * Registers a scraper tool. `kind` controls the MCP annotations Claude
- * Desktop uses to group tools in its UI:
- *   - 'read'  → readOnlyHint: true   (pure GETs — fetch data, never modify)
- *   - 'write' → readOnlyHint: false, destructiveHint: true
- *                                    (mutates state on the MyChart server)
- *   - 'local' → readOnlyHint: false, destructiveHint: false
- *                                    (mutates local extension state but
- *                                     doesn't touch the chart — e.g. picking
- *                                     the active account)
+ * Registers a scraper tool that requires an `account` (MyChart hostname).
+ * `kind` controls the MCP annotations Claude Desktop uses for grouping:
+ *   - 'read'  → readOnlyHint: true
+ *   - 'write' → readOnlyHint: false, destructiveHint: true (mutates MyChart)
  */
 function registerScraperTool<Shape extends ZodRawShape>(
   server: McpServer,
   name: string,
   description: string,
   inputShape: Shape,
-  handler: ScraperHandler<z.infer<z.ZodObject<Shape>>>,
-  opts: { kind: 'read' | 'write' | 'local'; title?: string } = { kind: 'read' },
+  handler: ScraperHandler<z.infer<z.ZodObject<Shape>> & { account: string }>,
+  opts: { kind: 'read' | 'write'; title?: string } = { kind: 'read' },
 ): void {
-  const fullShape = { account: z.string().optional().describe('MyChart hostname (required only when multiple accounts are configured)'), ...inputShape };
+  const fullShape = {
+    account: z.string().describe('MyChart hostname (the "account" / "account_id" — get the exact value from list_accounts).'),
+    ...inputShape,
+  };
   const annotations =
     opts.kind === 'read'
       ? { readOnlyHint: true, openWorldHint: true, ...(opts.title ? { title: opts.title } : {}) }
-      : opts.kind === 'write'
-        ? { readOnlyHint: false, destructiveHint: true, openWorldHint: true, ...(opts.title ? { title: opts.title } : {}) }
-        : { readOnlyHint: false, destructiveHint: false, openWorldHint: false, ...(opts.title ? { title: opts.title } : {}) };
+      : { readOnlyHint: false, destructiveHint: true, openWorldHint: true, ...(opts.title ? { title: opts.title } : {}) };
   server.registerTool(
     name,
     {
@@ -133,9 +144,9 @@ function registerScraperTool<Shape extends ZodRawShape>(
     },
     async (args: Record<string, unknown>) => {
       try {
-        const acct = typeof args.account === 'string' ? args.account : undefined;
+        const acct = typeof args.account === 'string' ? args.account : '';
         const session = await resolveSession(acct);
-        const data = await handler(session, args as z.infer<z.ZodObject<Shape>>);
+        const data = await handler(session, args as z.infer<z.ZodObject<Shape>> & { account: string });
         return jsonResult(data);
       } catch (err) {
         return errorResult((err as Error).message);
@@ -150,39 +161,19 @@ export function registerAllTools(server: McpServer): void {
   // ── Meta tools ────────────────────────────────────────────────────────────
 
   server.registerTool(
-    'setup_account',
-    {
-      title: 'Set up a MyChart account',
-      description:
-        'Walk the user through connecting a new MyChart account. ALWAYS use this when the user wants to add an account or says they have not set one up yet. The tool prompts the user (via Claude Desktop UI) for their MyChart, username, password, 2FA code if needed, and whether to register a passkey for passwordless logins.',
-      inputSchema: {} as ZodRawShape,
-      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-    },
-    async () => {
-      try {
-        const result = await runSetupFlow(server);
-        return textResult(result.message);
-      } catch (err) {
-        return errorResult((err as Error).message);
-      }
-    },
-  );
-
-  server.registerTool(
     'list_accounts',
     {
       title: 'List configured accounts',
-      description: 'List all configured MyChart accounts, their connection status, and which (if any) has a saved passkey.',
+      description: 'Returns every MyChart account that has been set up on this machine. Use the `hostname` field from each result as the `account` parameter for any other tool. Always call this first if you do not already know the account hostname.',
       inputSchema: {} as ZodRawShape,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async () => {
       const accounts = readAccounts();
-      const active = getActiveAccount();
       return jsonResult({
         count: accounts.length,
-        active,
         accounts: accounts.map(a => ({
+          account: a.hostname,
           hostname: a.hostname,
           username: a.username,
           connected: isConnected(a.hostname),
@@ -194,42 +185,187 @@ export function registerAllTools(server: McpServer): void {
   );
 
   server.registerTool(
-    'disconnect_account',
+    'search_mycharts',
     {
-      title: 'Forget a MyChart account',
-      description: 'Forget a saved MyChart account. Deletes the local credentials, passkey, and cached session for this hostname.',
-      inputSchema: { hostname: z.string().describe('Hostname of the MyChart account to forget (e.g. mychart.example.org).') } satisfies ZodRawShape,
-      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+      title: 'Search the MyChart directory',
+      description: "Look up a MyChart hostname for setup. Type a few letters of the user's health system name (e.g. \"uchealth\", \"mass general\"). Returns matching entries with their hostname, display name, and logo URL. Pass the chosen `hostname` to setup_account.",
+      inputSchema: {
+        query: z.string().min(1).describe('Substring of the health system name to search for (case-insensitive).'),
+        limit: z.number().int().min(1).max(50).optional().describe('Maximum results to return (default 10).'),
+      } satisfies ZodRawShape,
+      annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async ({ hostname }) => {
-      clearSession(hostname);
-      const removed = removeAccount(hostname);
-      if (!removed) return textResult(`No saved account for ${hostname}.`);
-      return textResult(`Forgot ${hostname}. Credentials, passkey, and session cache have been deleted from disk.`);
+    async ({ query, limit }) => {
+      const matches = searchInstances(query, limit ?? 10);
+      return jsonResult({
+        query,
+        count: matches.length,
+        matches: matches.map(m => ({ hostname: m.hostname, name: m.name, logoUrl: m.logoUrl, loginUrl: m.url })),
+      });
     },
   );
 
   server.registerTool(
-    'select_account',
+    'setup_account',
     {
-      title: 'Pick which account is active',
-      description: 'Pick which MyChart account to use for subsequent tool calls. Required when multiple accounts are configured and the user mentions a specific one. Pass a substring of the hostname (e.g. "uchealth") to fuzzy-match.',
-      inputSchema: { query: z.string().describe('Substring of the hostname or username (case-insensitive).') } satisfies ZodRawShape,
-      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      title: 'Set up a MyChart account (step 1)',
+      description: "Attempt to log into MyChart and save the account for future calls. The model should first ask the user for their MyChart hostname (use search_mycharts to look it up) and credentials in chat, then call this tool. Returns one of: `{state:\"logged_in\", account}`, `{state:\"need_2fa\", pending_id, delivery, target}` (call complete_2fa next with the user-supplied code), or `{state:\"invalid_login\"}`.",
+      inputSchema: {
+        hostname: z.string().describe('MyChart hostname, e.g. "mychart.example.org". From search_mycharts or the user.'),
+        username: z.string().describe('MyChart username (ask the user).'),
+        password: z.string().describe('MyChart password (ask the user). Stored locally on disk, never transmitted to Anthropic.'),
+      } satisfies ZodRawShape,
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
-    async ({ query }) => {
-      const q = (query || '').toLowerCase().trim();
-      if (!q) return errorResult('query is required.');
-      const accounts = readAccounts();
-      const matches = accounts.filter(a => a.hostname.includes(q) || a.username.toLowerCase().includes(q));
-      if (matches.length === 0) {
-        return errorResult(`No account matches "${query}". Available: ${accounts.map(a => a.hostname).join(', ') || '(none)'}`);
+    async ({ hostname, username, password }) => {
+      try {
+        const result = await myChartUserPassLogin({ hostname, user: username, pass: password });
+
+        if (result.state === 'logged_in') {
+          upsertAccount({ hostname: normalizeHostname(hostname), username, password });
+          await adoptSession(hostname, result.mychartRequest);
+          return jsonResult({
+            state: 'logged_in',
+            account: normalizeHostname(hostname),
+            message: 'Account connected. Future tool calls can pass this hostname as `account`. Consider calling register_passkey next so future sessions skip the password and 2FA prompts.',
+          });
+        }
+
+        if (result.state === 'invalid_login') {
+          return jsonResult({
+            state: 'invalid_login',
+            account: normalizeHostname(hostname),
+            message: 'MyChart rejected those credentials. Double-check the username + password with the user and call setup_account again.',
+          });
+        }
+
+        if (result.state === 'need_2fa') {
+          const pending_id = addPending({
+            hostname: normalizeHostname(hostname),
+            username,
+            password,
+            mychartRequest: result.mychartRequest,
+          });
+          return jsonResult({
+            state: 'need_2fa',
+            pending_id,
+            account: normalizeHostname(hostname),
+            delivery: result.twoFaDelivery ?? null,
+            message: 'MyChart sent a 6-digit verification code. Ask the user for it, then call complete_2fa with this pending_id and the code.',
+          });
+        }
+
+        return jsonResult({
+          state: result.state,
+          account: normalizeHostname(hostname),
+          error: result.error ?? null,
+          message: `Login ended in unexpected state: ${result.state}. Tell the user and try again.`,
+        });
+      } catch (err) {
+        return errorResult((err as Error).message);
       }
-      if (matches.length > 1) {
-        return errorResult(`Multiple accounts match "${query}": ${matches.map(a => a.hostname).join(', ')}. Be more specific.`);
+    },
+  );
+
+  server.registerTool(
+    'complete_2fa',
+    {
+      title: 'Finish 2FA (step 2)',
+      description: 'Finish a setup_account flow that returned `need_2fa`. Pass the `pending_id` from that response and the 6-digit code the user gave you. On success the account is saved and immediately usable.',
+      inputSchema: {
+        pending_id: z.string().describe('The pending_id returned by setup_account when state was need_2fa.'),
+        code: z.string().describe('6-digit code the user read from email/SMS/authenticator.'),
+      } satisfies ZodRawShape,
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    },
+    async ({ pending_id, code }) => {
+      const pending = takePending(pending_id);
+      if (!pending) {
+        return errorResult('pending_id is unknown or has expired (10-minute TTL). Call setup_account again to start over.');
       }
-      setActiveAccount(matches[0].hostname);
-      return jsonResult({ selected: matches[0].hostname });
+      try {
+        const trimmed = code.trim();
+        const twoFa = await complete2faFlow({
+          mychartRequest: pending.mychartRequest,
+          code: trimmed,
+          isTOTP: false,
+        });
+        if (twoFa.state === 'logged_in') {
+          upsertAccount({ hostname: pending.hostname, username: pending.username, password: pending.password });
+          await adoptSession(pending.hostname, twoFa.mychartRequest);
+          return jsonResult({
+            state: 'logged_in',
+            account: pending.hostname,
+            message: 'Account connected. Future tool calls can pass this hostname as `account`. Consider calling register_passkey next so future sessions skip the password and 2FA prompts.',
+          });
+        }
+        if (twoFa.state === 'invalid_2fa') {
+          // Re-stash so the agent can ask the user again without restarting.
+          const newPendingId = addPending({
+            hostname: pending.hostname,
+            username: pending.username,
+            password: pending.password,
+            mychartRequest: pending.mychartRequest,
+          });
+          return jsonResult({
+            state: 'invalid_2fa',
+            pending_id: newPendingId,
+            account: pending.hostname,
+            message: 'That code was rejected. Ask the user for the code again and call complete_2fa with this new pending_id.',
+          });
+        }
+        return jsonResult({
+          state: twoFa.state,
+          account: pending.hostname,
+          message: `Unexpected 2FA result: ${twoFa.state}. Tell the user and call setup_account again.`,
+        });
+      } catch (err) {
+        return errorResult((err as Error).message);
+      }
+    },
+  );
+
+  server.registerTool(
+    'register_passkey',
+    {
+      title: 'Register a passkey on an account (optional, recommended)',
+      description: 'Register a passkey on an already-connected MyChart account so future logins skip the password and 2FA prompts entirely. Idempotent — calling it again just adds another passkey.',
+      inputSchema: {
+        account: z.string().describe('MyChart hostname (the account from list_accounts).'),
+      } satisfies ZodRawShape,
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    },
+    async ({ account }) => {
+      try {
+        const session = await resolveSession(account);
+        const credential = await setupPasskey(session);
+        if (!credential) {
+          return errorResult('Passkey registration failed: MyChart did not return a credential. Some instances disable passkey registration via the patient portal.');
+        }
+        saveAccountPasskey(account, serializeCredential(credential));
+        return textResult(`Passkey saved for ${normalizeHostname(account)}. Future sessions will skip the password and 2FA prompts.`);
+      } catch (err) {
+        return errorResult((err as Error).message);
+      }
+    },
+  );
+
+  server.registerTool(
+    'disconnect_account',
+    {
+      title: 'Forget a MyChart account',
+      description: 'Forget a saved MyChart account. Deletes the local credentials, passkey, and cached session for this hostname.',
+      inputSchema: {
+        account: z.string().describe('MyChart hostname (the account from list_accounts).'),
+      } satisfies ZodRawShape,
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    },
+    async ({ account }) => {
+      clearSession(account);
+      const removed = removeAccount(account);
+      const known = findAccount(account);
+      if (!removed && !known) return textResult(`No saved account for ${account}.`);
+      return textResult(`Forgot ${normalizeHostname(account)}. Credentials, passkey, and session cache have been deleted from disk.`);
     },
   );
 
@@ -288,9 +424,7 @@ export function registerAllTools(server: McpServer): void {
       jpeg_quality: z.number().int().min(1).max(100).optional().describe('JPEG quality 1-100 (default 85).'),
     },
     async (req, { study_id, max_images, jpeg_quality }) => {
-      const downloaded = await downloadImagingStudyDirect(req, {
-        studyId: study_id,
-      });
+      const downloaded = await downloadImagingStudyDirect(req, { studyId: study_id });
       if (!downloaded || !downloaded.images || downloaded.images.length === 0) {
         return { study_id, images: [] };
       }
