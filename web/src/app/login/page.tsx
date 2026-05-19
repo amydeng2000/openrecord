@@ -554,6 +554,9 @@ export default function LoginPage() {
               <a href="#features" className="px-4 py-2 text-xs font-medium text-slate-500 hover:text-slate-900 uppercase tracking-wider rounded-full hover:bg-white/60 transition-all">
                 Features
               </a>
+                            <a href="#privacy" className="px-4 py-2 text-xs font-medium text-slate-500 hover:text-slate-900 uppercase tracking-wider rounded-full hover:bg-white/60 transition-all">
+                Privacy
+              </a>
               <a href="#setup" className="px-4 py-2 text-xs font-medium text-slate-500 hover:text-slate-900 uppercase tracking-wider rounded-full hover:bg-white/60 transition-all">
                 Setup
               </a>
@@ -687,6 +690,88 @@ export default function LoginPage() {
                 {feature.visual}
               </div>
             ))}
+          </div>
+        </section>
+
+        {/* Privacy and Security Emphasis */}
+        <section id="privacy" className="max-w-[1400px] mx-auto px-6 py-24 md:py-32 text-center">
+          <h2 className="text-4xl md:text-5xl font-medium text-slate-900 tracking-tight mb-6">Your data stays private and secure</h2>
+          <p className="text-lg text-slate-500 max-w-2xl mx-auto mb-8 font-light">
+            We encrypt all MyChart credentials at rest and never store any of your health data. 
+            All communication happens directly between your MyChart portal and the AI assistant, 
+            ensuring your information never leaves your trusted environment.
+          </p>
+          <div className="flex items-center justify-center gap-4 mb-16">
+            <div className="flex items-center bg-emerald-100/20 rounded-full px-4 py-2 border border-emerald-500/20">
+              <Icon icon="solar:lock-password-linear" width={20} height={20} className="text-emerald-600" />
+              <span className="ml-2 text-emerald-800 font-medium text-sm">End‑to‑end encryption</span>
+            </div>
+            <div className="flex items-center bg-emerald-100/20 rounded-full px-4 py-2 border border-emerald-500/20">
+              <Icon icon="solar:cloud-off-linear" width={20} height={20} className="text-emerald-600" />
+              <span className="ml-2 text-emerald-800 font-medium text-sm">No data storage</span>
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-8 text-left max-w-5xl mx-auto">
+            <div className="bg-white/60 backdrop-blur-md rounded-[2rem] p-8 border border-slate-200/60 shadow-[0_8px_30px_rgba(0,0,0,0.04)] relative overflow-hidden group hover:shadow-[0_8px_30px_rgba(16,185,129,0.1)] hover:bg-white/90 transition-all duration-500 hover:-translate-y-1">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-400/10 rounded-full blur-2xl group-hover:bg-emerald-400/20 transition-colors duration-500" />
+              <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center mb-6 border border-emerald-100 shadow-sm">
+                <Icon icon="solar:cpu-linear" width={24} height={24} className="text-emerald-600" />
+              </div>
+              <h3 className="text-2xl font-medium text-slate-900 mb-4 tracking-tight">OpenClaw Plugin</h3>
+              <ul className="space-y-3 text-slate-500 font-light leading-relaxed">
+                <li className="flex items-start gap-3">
+                  <Icon icon="solar:check-circle-linear" width={20} height={20} className="text-emerald-500 shrink-0 mt-0.5" />
+                  <span>Runs entirely locally within your browser</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <Icon icon="solar:check-circle-linear" width={20} height={20} className="text-emerald-500 shrink-0 mt-0.5" />
+                  <span>Uses your existing, authenticated MyChart session</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <Icon icon="solar:check-circle-linear" width={20} height={20} className="text-emerald-500 shrink-0 mt-0.5" />
+                  <span>Zero intermediary servers parsing your records</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <Icon icon="solar:check-circle-linear" width={20} height={20} className="text-emerald-500 shrink-0 mt-0.5" />
+                  <span>No persistent data storage—cleared when session ends</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <Icon icon="solar:check-circle-linear" width={20} height={20} className="text-emerald-500 shrink-0 mt-0.5" />
+                  <span>Full control over which information is accessed</span>
+                </li>
+              </ul>
+            </div>
+            
+            <div className="bg-white/60 backdrop-blur-md rounded-[2rem] p-8 border border-slate-200/60 shadow-[0_8px_30px_rgba(0,0,0,0.04)] relative overflow-hidden group hover:shadow-[0_8px_30px_rgba(59,130,246,0.1)] hover:bg-white/90 transition-all duration-500 hover:-translate-y-1">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-blue-400/10 rounded-full blur-2xl group-hover:bg-blue-400/20 transition-colors duration-500" />
+              <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center mb-6 border border-blue-100 shadow-sm">
+                <Icon icon="solar:monitor-linear" width={24} height={24} className="text-blue-600" />
+              </div>
+              <h3 className="text-2xl font-medium text-slate-900 mb-4 tracking-tight">Desktop Extension</h3>
+              <ul className="space-y-3 text-slate-500 font-light leading-relaxed">
+                <li className="flex items-start gap-3">
+                  <Icon icon="solar:check-circle-linear" width={20} height={20} className="text-blue-500 shrink-0 mt-0.5" />
+                  <span>Acts as a direct tunnel to Claude Desktop</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <Icon icon="solar:check-circle-linear" width={20} height={20} className="text-blue-500 shrink-0 mt-0.5" />
+                  <span>Transmits over secure localhost endpoints</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <Icon icon="solar:check-circle-linear" width={20} height={20} className="text-blue-500 shrink-0 mt-0.5" />
+                  <span>Data stays strictly on your machine, off the internet</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <Icon icon="solar:check-circle-linear" width={20} height={20} className="text-blue-500 shrink-0 mt-0.5" />
+                  <span>Strict permissions guard against unauthorized access</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <Icon icon="solar:check-circle-linear" width={20} height={20} className="text-blue-500 shrink-0 mt-0.5" />
+                  <span>Operates in a sandboxed, isolated environment</span>
+                </li>
+              </ul>
+            </div>
           </div>
         </section>
 
