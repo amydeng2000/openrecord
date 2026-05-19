@@ -817,7 +817,7 @@ export default function LoginPage() {
                   <Icon icon="lucide:check" width={24} height={24} />
                 </div>
                 <h3 className="text-xl font-medium text-emerald-900 mb-2">Thanks for subscribing!</h3>
-                <p className="text-emerald-700">We'll keep you updated on the latest features.</p>
+                <p className="text-emerald-700">We&apos;ll keep you updated on the latest features.</p>
               </div>
             ) : (
               <form onSubmit={handleNewsletterSubmit} className="flex flex-col gap-4">
