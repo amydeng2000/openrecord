@@ -73,6 +73,7 @@ import { downloadImagingStudyDirect } from '../../scrapers/myChart/eunity/imagin
 import { convertCloToBitmap16 } from '../../scrapers/myChart/clo-image-parser/clo_to_bitmap';
 
 import { searchInstances } from './instances';
+import { SETUP_UI_HTML } from './ui';
 import {
   resolveSession,
   isConnected,
@@ -170,18 +171,68 @@ export function registerAllTools(server: McpServer): void {
     },
     async () => {
       const accounts = readAccounts();
-      return jsonResult({
-        count: accounts.length,
-        accounts: accounts.map(a => ({
-          account: a.hostname,
-          hostname: a.hostname,
-          username: a.username,
-          connected: isConnected(a.hostname),
-          hasPasskey: !!readAccountPasskey(a.hostname),
-          hasTotpSecret: !!a.totpSecret,
-        })),
-      });
+      const result: ToolResult = {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              count: accounts.length,
+              accounts: accounts.map(a => ({
+                account: a.hostname,
+                hostname: a.hostname,
+                username: a.username,
+                connected: isConnected(a.hostname),
+                hasPasskey: !!readAccountPasskey(a.hostname),
+                hasTotpSecret: !!a.totpSecret,
+              })),
+            }, null, 2),
+          },
+        ],
+      };
+
+      if (accounts.length === 0) {
+        result.content.push({
+          type: 'text',
+          text: '\nNo MyChart accounts are connected yet. You can use the setup widget below to get started:',
+        });
+        result.content.push({
+          type: 'resource',
+          resource: {
+            uri: 'ui://openrecord/setup',
+            mimeType: 'text/html',
+            text: SETUP_UI_HTML,
+          },
+        });
+      }
+
+      return result;
     },
+  );
+
+  server.registerTool(
+    'get_setup_widget',
+    {
+      title: 'Get interactive setup widget',
+      description: 'Display an interactive widget for connecting a MyChart account. Use this if the user wants a GUI instead of chat-based setup.',
+      inputSchema: {} satisfies ZodRawShape,
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async () => ({
+      content: [
+        {
+          type: 'text',
+          text: 'I can help you connect your MyChart account using this interactive widget. You can search for your health system and sign in securely.',
+        },
+        {
+          type: 'resource',
+          resource: {
+            uri: 'ui://openrecord/setup',
+            mimeType: 'text/html',
+            text: SETUP_UI_HTML,
+          },
+        },
+      ],
+    }),
   );
 
   server.registerTool(

@@ -75,81 +75,6 @@ export const SETUP_UI_HTML = `
     input:focus {
       border-color: var(--accent);
     }
-    .autocomplete-container {
-      position: relative;
-    }
-    .dropdown {
-      position: absolute;
-      top: calc(100% + 4px);
-      left: 0;
-      right: 0;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      max-height: 240px;
-      overflow-y: auto;
-      z-index: 100;
-      display: none;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.15);
-    }
-    .dropdown.show {
-      display: block;
-    }
-    .item {
-      padding: 10px 12px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      border-bottom: 1px solid var(--border);
-    }
-    .item:last-child {
-      border-bottom: none;
-    }
-    .item:hover {
-      background: var(--hover);
-    }
-    .item img {
-      width: 32px;
-      height: 32px;
-      border-radius: 6px;
-      object-fit: contain;
-      background: white;
-      padding: 2px;
-      border: 1px solid var(--border);
-    }
-    .item .placeholder-logo {
-      width: 32px;
-      height: 32px;
-      border-radius: 6px;
-      background: var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: bold;
-      font-size: 14px;
-      color: var(--text);
-      opacity: 0.5;
-    }
-    .item .info {
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    .item .name {
-      font-weight: 600;
-      font-size: 14px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .item .hostname {
-      font-size: 11px;
-      opacity: 0.6;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
     .actions {
       display: flex;
       flex-direction: column;
@@ -214,11 +139,7 @@ export const SETUP_UI_HTML = `
     <div id="setup-form">
       <div class="field">
         <label>Health System</label>
-        <div class="autocomplete-container">
-          <input type="text" id="system-search" placeholder="Search (e.g. UCHealth, Mass General)..." autocomplete="off">
-          <div id="dropdown" class="dropdown"></div>
-        </div>
-        <input type="hidden" id="hostname">
+        <input type="text" id="hostname" placeholder="e.g. mychart.example.org">
       </div>
 
       <div class="field">
@@ -243,8 +164,6 @@ export const SETUP_UI_HTML = `
   </div>
 
   <script>
-    const searchInput = document.getElementById('system-search');
-    const dropdown = document.getElementById('dropdown');
     const hostnameInput = document.getElementById('hostname');
     const usernameInput = document.getElementById('username');
     const passwordInput = document.getElementById('password');
@@ -254,20 +173,7 @@ export const SETUP_UI_HTML = `
     const statusDiv = document.getElementById('status');
     const setupForm = document.getElementById('setup-form');
     
-    let instances = [];
     let pendingId = null;
-
-    async function init() {
-      try {
-        // Fetch full instance list from MCP resource
-        const response = await fetch('resource://openrecord/instances');
-        if (response.ok) {
-          instances = await response.json();
-        }
-      } catch (e) {
-        console.error('Failed to load instances', e);
-      }
-    }
 
     function showStatus(msg, type = 'error') {
       statusDiv.innerText = msg;
@@ -278,65 +184,29 @@ export const SETUP_UI_HTML = `
       statusDiv.style.display = 'none';
     }
 
-    searchInput.addEventListener('input', () => {
-      const query = searchInput.value.toLowerCase().trim();
-      hideStatus();
-      if (query.length < 2) {
-        dropdown.classList.remove('show');
-        return;
+    function looksLikeHostname(value) {
+      return value.includes('.') || value.includes('://');
+    }
+
+    async function resolveHostname(value, callTool) {
+      const trimmed = value.trim();
+      if (looksLikeHostname(trimmed)) {
+        return trimmed.replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '');
       }
 
-      const matches = instances.filter(i => 
-        i.name.toLowerCase().includes(query) || 
-        i.hostname.toLowerCase().includes(query)
-      ).slice(0, 8);
-
-      dropdown.innerHTML = '';
-      matches.forEach(m => {
-        const div = document.createElement('div');
-        div.className = 'item';
-        const logoHtml = m.logoUrl 
-          ? \`<img src="\${m.logoUrl}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">\`
-          : '';
-        const placeholderHtml = \`<div class="placeholder-logo" \${m.logoUrl ? 'style="display:none"' : ''}>\${m.name[0]}</div>\`;
-        
-        div.innerHTML = \`
-          \${logoHtml}
-          \${placeholderHtml}
-          <div class="info">
-            <span class="name">\${m.name}</span>
-            <span class="hostname">\${m.hostname}</span>
-          </div>
-        \`;
-        div.onclick = () => {
-          searchInput.value = m.name;
-          hostnameInput.value = m.hostname;
-          dropdown.classList.remove('show');
-        };
-        dropdown.appendChild(div);
-      });
-
-      if (matches.length > 0) {
-        dropdown.classList.add('show');
-      } else {
-        dropdown.classList.remove('show');
-      }
-    });
-
-    document.addEventListener('click', (e) => {
-      if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
-        dropdown.classList.remove('show');
-      }
-    });
+      const result = await callTool('search_mycharts', { query: trimmed, limit: 1 });
+      const match = result && Array.isArray(result.matches) ? result.matches[0] : null;
+      return match ? match.hostname : '';
+    }
 
     submitBtn.onclick = async () => {
-      const hostname = hostnameInput.value;
+      const healthSystem = hostnameInput.value;
       const username = usernameInput.value;
       const password = passwordInput.value;
       const code = twoFaInput.value;
 
-      if (!hostname) {
-        showStatus('Please select a health system from the list.');
+      if (!healthSystem) {
+        showStatus('Please enter your health system or MyChart hostname.');
         return;
       }
       if (!username || !password) {
@@ -350,6 +220,21 @@ export const SETUP_UI_HTML = `
       submitBtn.innerHTML = '<span class="loader"></span> Connecting...';
 
       try {
+        const callTool = async (name, args) => {
+          const result = await window.mcp.callTool(name, args);
+          if (result && result.content && Array.isArray(result.content)) {
+            const textContent = result.content.find(c => c.type === 'text');
+            if (textContent) {
+              try {
+                return JSON.parse(textContent.text);
+              } catch (e) {
+                return textContent.text;
+              }
+            }
+          }
+          return result;
+        };
+
         if (pendingId) {
           // Complete 2FA
           if (!code || code.length < 6) {
@@ -358,7 +243,7 @@ export const SETUP_UI_HTML = `
             submitBtn.innerText = originalText;
             return;
           }
-          const result = await window.mcp.callTool('complete_2fa', { pending_id: pendingId, code });
+          const result = await callTool('complete_2fa', { pending_id: pendingId, code });
           if (result.state === 'logged_in') {
             showStatus('Successfully connected! You can now close this widget.', 'success');
             setupForm.style.display = 'none';
@@ -374,7 +259,15 @@ export const SETUP_UI_HTML = `
           }
         } else {
           // Initial Login
-          const result = await window.mcp.callTool('setup_account', { hostname, username, password });
+          const hostname = await resolveHostname(healthSystem, callTool);
+          if (!hostname) {
+            showStatus('Could not find that health system. Try entering the MyChart hostname directly.');
+            submitBtn.disabled = false;
+            submitBtn.innerText = 'Connect Account';
+            return;
+          }
+
+          const result = await callTool('setup_account', { hostname, username, password });
           
           if (result.state === 'need_2fa') {
             pendingId = result.pending_id;
@@ -401,8 +294,6 @@ export const SETUP_UI_HTML = `
         submitBtn.innerText = originalText;
       }
     };
-
-    init();
   </script>
 </body>
 </html>

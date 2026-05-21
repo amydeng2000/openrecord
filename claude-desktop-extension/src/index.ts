@@ -46,8 +46,9 @@ async function main(): Promise<void> {
         'first. Multiple accounts can be active at once; just pass a different `account` per call.' +
         '\n\n' +
         'Interactive Setup (Recommended):' +
-        '\n  Tell the user you can help them connect MyChart using an interactive widget. ' +
-        '  Point them to the setup UI at: ui://openrecord/setup' +
+        '\n  If the user needs to connect an account, call get_setup_widget() to display the ' +
+        '  interactive login widget inline. This is the easiest way for users to search ' +
+        '  for their health system and sign in.' +
         '\n\n' +
         'Manual Setup Flow:' +
         '\n  1. Call list_accounts. If the user\'s MyChart is already there, skip to step 5.' +
