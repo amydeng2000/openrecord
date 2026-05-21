@@ -27,6 +27,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { registerAllTools } from './tools';
 import { clearAllSessions } from './session-manager';
+import { allInstances } from './instances';
+import { SETUP_UI_HTML } from './ui';
 
 async function main(): Promise<void> {
   const server = new McpServer(
@@ -35,7 +37,7 @@ async function main(): Promise<void> {
       version: '0.1.0',
     },
     {
-      capabilities: { tools: {} },
+      capabilities: { tools: {}, resources: {} },
       instructions:
         'OpenRecord connects this conversation to the user\'s MyChart patient portal. ' +
         '\n\n' +
@@ -43,7 +45,11 @@ async function main(): Promise<void> {
         'list_accounts. If you do not already know which account to use, call list_accounts ' +
         'first. Multiple accounts can be active at once; just pass a different `account` per call.' +
         '\n\n' +
-        'Setup flow (no MCP elicitation needed — runs as ordinary tool calls + chat prompts):' +
+        'Interactive Setup (Recommended):' +
+        '\n  Tell the user you can help them connect MyChart using an interactive widget. ' +
+        '  Point them to the setup UI at: ui://openrecord/setup' +
+        '\n\n' +
+        'Manual Setup Flow:' +
         '\n  1. Call list_accounts. If the user\'s MyChart is already there, skip to step 5.' +
         '\n  2. Ask the user for their health system name. Call search_mycharts(query) to find the hostname.' +
         '\n  3. Ask the user for their MyChart username and password.' +
@@ -53,6 +59,34 @@ async function main(): Promise<void> {
         '\n  6. Use the data tools (get_medications, get_lab_results, send_message, etc.) with the ' +
         '     `account` from the previous step.',
     },
+  );
+
+  // ── Resources ─────────────────────────────────────────────────────────────
+
+  // Serve the interactive setup widget HTML
+  server.resource(
+    'setup-ui',
+    'ui://openrecord/setup',
+    { title: 'Connect MyChart (Setup Widget)', mimeType: 'text/html' },
+    async () => ({
+      contents: [{
+        uri: 'ui://openrecord/setup',
+        text: SETUP_UI_HTML,
+      }],
+    })
+  );
+
+  // Serve the full instance list for the widget's autocomplete
+  server.resource(
+    'instances-data',
+    'resource://openrecord/instances',
+    { title: 'MyChart Instances Data', mimeType: 'application/json' },
+    async () => ({
+      contents: [{
+        uri: 'resource://openrecord/instances',
+        text: JSON.stringify(allInstances()),
+      }],
+    })
   );
 
   registerAllTools(server);
