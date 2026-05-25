@@ -73,7 +73,6 @@ import { downloadImagingStudyDirect } from '../../scrapers/myChart/eunity/imagin
 import { convertCloToBitmap16 } from '../../scrapers/myChart/clo-image-parser/clo_to_bitmap';
 
 import { searchInstances } from './instances';
-import { SETUP_UI_HTML } from './ui';
 import {
   resolveSession,
   isConnected,
@@ -107,6 +106,35 @@ function textResult(text: string): ToolResult {
 
 function errorResult(message: string): ToolResult {
   return { content: [{ type: 'text', text: `Error: ${message}` }], isError: true };
+}
+
+// ── Auto-register a passkey on first login ─────────────────────────────────
+
+/**
+ * Best-effort: register a passkey on the just-logged-in session so future
+ * launches skip the password + 2FA prompt entirely. Silently no-ops if a
+ * passkey is already saved, or if the instance disables passkey registration.
+ * Returns true iff a new passkey was saved.
+ */
+async function tryAutoRegisterPasskey(
+  hostname: string,
+  session: MyChartRequest,
+): Promise<boolean> {
+  const key = normalizeHostname(hostname);
+  if (readAccountPasskey(key)) return false;
+  try {
+    const credential = await setupPasskey(session);
+    if (!credential) {
+      process.stderr.write(`[openrecord:${key}] passkey auto-registration skipped (instance returned no credential)\n`);
+      return false;
+    }
+    saveAccountPasskey(key, serializeCredential(credential));
+    process.stderr.write(`[openrecord:${key}] passkey auto-registered — future sessions will skip 2FA\n`);
+    return true;
+  } catch (err) {
+    process.stderr.write(`[openrecord:${key}] passkey auto-registration failed: ${(err as Error).message}\n`);
+    return false;
+  }
 }
 
 // ── Scraper tool registration helper ───────────────────────────────────────
@@ -165,27 +193,27 @@ export function registerAllTools(server: McpServer): void {
     'list_accounts',
     {
       title: 'List configured accounts',
-      description: 'Returns every MyChart account that has been set up on this machine. Use the `hostname` field from each result as the `account` parameter for any other tool. Always call this first if you do not already know the account hostname.',
+      description: 'Returns every MyChart account whose credentials are already saved on this machine. Every entry in `accounts` is fully configured — pass its `hostname` as the `account` parameter to any data tool. NEVER ask the user for credentials again for an account that appears here, regardless of the `sessionActive` flag (sessions are created on-demand by the next tool call).',
       inputSchema: {} as ZodRawShape,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async () => {
       const accounts = readAccounts();
+      const accountList = accounts.map(a => ({
+        account: a.hostname,
+        hostname: a.hostname,
+        username: a.username,
+        configured: true,
+        sessionActive: isConnected(a.hostname),
+        hasPasskey: !!readAccountPasskey(a.hostname),
+        hasTotpSecret: !!a.totpSecret,
+      }));
+
       const result: ToolResult = {
         content: [
           {
             type: 'text',
-            text: JSON.stringify({
-              count: accounts.length,
-              accounts: accounts.map(a => ({
-                account: a.hostname,
-                hostname: a.hostname,
-                username: a.username,
-                connected: isConnected(a.hostname),
-                hasPasskey: !!readAccountPasskey(a.hostname),
-                hasTotpSecret: !!a.totpSecret,
-              })),
-            }, null, 2),
+            text: JSON.stringify({ count: accounts.length, accounts: accountList }, null, 2),
           },
         ],
       };
@@ -193,15 +221,16 @@ export function registerAllTools(server: McpServer): void {
       if (accounts.length === 0) {
         result.content.push({
           type: 'text',
-          text: '\nNo MyChart accounts are connected yet. You can use the setup widget below to get started:',
+          text: '\nNo MyChart accounts are configured yet. Call get_setup_widget to display the interactive connection widget.',
         });
+      } else {
         result.content.push({
-          type: 'resource',
-          resource: {
-            uri: 'ui://openrecord/setup',
-            mimeType: 'text/html',
-            text: SETUP_UI_HTML,
-          },
+          type: 'text',
+          text:
+            '\nThese accounts are already configured — credentials are stored on disk. ' +
+            'Call data tools directly with `account: <hostname>`; login + 2FA happen automatically via the saved passkey or password. ' +
+            'DO NOT re-prompt the user for username, password, or hostname. ' +
+            '`sessionActive: false` just means no in-memory session yet; the next tool call will create one transparently.',
         });
       }
 
@@ -216,20 +245,13 @@ export function registerAllTools(server: McpServer): void {
       description: 'Display an interactive widget for connecting a MyChart account. Use this if the user wants a GUI instead of chat-based setup.',
       inputSchema: {} satisfies ZodRawShape,
       annotations: { readOnlyHint: true, openWorldHint: false },
+      _meta: { 'openai/outputTemplate': 'ui://openrecord/setup', ui: { resourceUri: 'ui://openrecord/setup' } },
     },
     async () => ({
       content: [
         {
           type: 'text',
-          text: 'I can help you connect your MyChart account using this interactive widget. You can search for your health system and sign in securely.',
-        },
-        {
-          type: 'resource',
-          resource: {
-            uri: 'ui://openrecord/setup',
-            mimeType: 'text/html',
-            text: SETUP_UI_HTML,
-          },
+          text: 'Enter your MyChart hostname, username, and password in the widget to connect your account.',
         },
       ],
     }),
@@ -275,10 +297,14 @@ export function registerAllTools(server: McpServer): void {
         if (result.state === 'logged_in') {
           upsertAccount({ hostname: normalizeHostname(hostname), username, password });
           await adoptSession(hostname, result.mychartRequest);
+          const passkeyRegistered = await tryAutoRegisterPasskey(hostname, result.mychartRequest);
           return jsonResult({
             state: 'logged_in',
             account: normalizeHostname(hostname),
-            message: 'Account connected. Future tool calls can pass this hostname as `account`. Consider calling register_passkey next so future sessions skip the password and 2FA prompts.',
+            passkey_registered: passkeyRegistered,
+            message: passkeyRegistered
+              ? 'Account connected and passkey saved — future sessions will skip the password and 2FA prompts.'
+              : 'Account connected. Future tool calls can pass this hostname as `account`.',
           });
         }
 
@@ -344,10 +370,14 @@ export function registerAllTools(server: McpServer): void {
         if (twoFa.state === 'logged_in') {
           upsertAccount({ hostname: pending.hostname, username: pending.username, password: pending.password });
           await adoptSession(pending.hostname, twoFa.mychartRequest);
+          const passkeyRegistered = await tryAutoRegisterPasskey(pending.hostname, twoFa.mychartRequest);
           return jsonResult({
             state: 'logged_in',
             account: pending.hostname,
-            message: 'Account connected. Future tool calls can pass this hostname as `account`. Consider calling register_passkey next so future sessions skip the password and 2FA prompts.',
+            passkey_registered: passkeyRegistered,
+            message: passkeyRegistered
+              ? 'Account connected and passkey saved — future sessions will skip the password and 2FA prompts.'
+              : 'Account connected. Future tool calls can pass this hostname as `account`.',
           });
         }
         if (twoFa.state === 'invalid_2fa') {

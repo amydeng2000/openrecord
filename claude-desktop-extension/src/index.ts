@@ -27,8 +27,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { registerAllTools } from './tools';
 import { clearAllSessions } from './session-manager';
-import { allInstances } from './instances';
-import { SETUP_UI_HTML } from './ui';
+import { SETUP_UI_HTML, SETUP_UI_MIME_TYPE } from './ui';
 
 async function main(): Promise<void> {
   const server = new McpServer(
@@ -45,19 +44,27 @@ async function main(): Promise<void> {
         'list_accounts. If you do not already know which account to use, call list_accounts ' +
         'first. Multiple accounts can be active at once; just pass a different `account` per call.' +
         '\n\n' +
-        'Interactive Setup (Recommended):' +
-        '\n  If the user needs to connect an account, call get_setup_widget() to display the ' +
-        '  interactive login widget inline. This is the easiest way for users to search ' +
-        '  for their health system and sign in.' +
+        'CRITICAL: If list_accounts returns any entries, those accounts are ALREADY SET UP. ' +
+        'Do NOT ask the user for hostname, username, or password again. Just call the relevant ' +
+        'data tool (get_profile, get_medications, etc.) with `account: <hostname>` and the server ' +
+        'will silently re-authenticate using the saved passkey or password — no user interaction ' +
+        'required. The `sessionActive: false` flag means "no live in-memory session"; it does NOT ' +
+        'mean the account needs to be reconfigured. Only run the setup flow below if list_accounts ' +
+        'returns `count: 0` or if a data tool fails with "invalid_login" or "no passkey/TOTP saved".' +
         '\n\n' +
-        'Manual Setup Flow:' +
-        '\n  1. Call list_accounts. If the user\'s MyChart is already there, skip to step 5.' +
-        '\n  2. Ask the user for their health system name. Call search_mycharts(query) to find the hostname.' +
-        '\n  3. Ask the user for their MyChart username and password.' +
-        '\n  4. Call setup_account(hostname, username, password). On `need_2fa`, ask the user for the ' +
+        'Interactive Setup (Recommended for first-time setup):' +
+        '\n  If the user has no configured account, call get_setup_widget() to display the ' +
+        '  interactive login widget inline. This is the easiest way for users to enter ' +
+        '  their MyChart hostname and sign in.' +
+        '\n\n' +
+        'Manual Setup Flow (only when list_accounts returns count: 0):' +
+        '\n  1. Ask the user for their health system name. Call search_mycharts(query) to find the hostname.' +
+        '\n  2. Ask the user for their MyChart username and password.' +
+        '\n  3. Call setup_account(hostname, username, password). On `need_2fa`, ask the user for the ' +
         '     6-digit code, then call complete_2fa(pending_id, code). On `invalid_login`, ask again.' +
-        '\n  5. (Recommended) Call register_passkey(account) so future logins skip the password + 2FA.' +
-        '\n  6. Use the data tools (get_medications, get_lab_results, send_message, etc.) with the ' +
+        '\n  4. A passkey is auto-registered on success (`passkey_registered: true`) so future ' +
+        '     sessions skip the password + 2FA prompts entirely.' +
+        '\n  5. Use the data tools (get_medications, get_lab_results, send_message, etc.) with the ' +
         '     `account` from the previous step.',
     },
   );
@@ -68,24 +75,12 @@ async function main(): Promise<void> {
   server.resource(
     'setup-ui',
     'ui://openrecord/setup',
-    { title: 'Connect MyChart (Setup Widget)', mimeType: 'text/html' },
+    { title: 'Connect MyChart (Setup Widget)', mimeType: SETUP_UI_MIME_TYPE },
     async () => ({
       contents: [{
         uri: 'ui://openrecord/setup',
+        mimeType: SETUP_UI_MIME_TYPE,
         text: SETUP_UI_HTML,
-      }],
-    })
-  );
-
-  // Serve the full instance list for the widget's autocomplete
-  server.resource(
-    'instances-data',
-    'resource://openrecord/instances',
-    { title: 'MyChart Instances Data', mimeType: 'application/json' },
-    async () => ({
-      contents: [{
-        uri: 'resource://openrecord/instances',
-        text: JSON.stringify(allInstances()),
       }],
     })
   );

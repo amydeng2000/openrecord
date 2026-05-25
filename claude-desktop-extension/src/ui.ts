@@ -1,3 +1,5 @@
+export const SETUP_UI_MIME_TYPE = 'text/html;profile=mcp-app';
+
 /**
  * Interactive Setup Widget for OpenRecord.
  *
@@ -37,38 +39,38 @@ export const SETUP_UI_HTML = `
       background: var(--bg);
       color: var(--text);
       margin: 0;
-      padding: 16px;
-      line-height: 1.4;
+      padding: 10px 12px;
+      line-height: 1.3;
     }
     .container {
       max-width: 400px;
       margin: 0 auto;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 8px;
     }
     h1 {
-      font-size: 18px;
-      margin: 0 0 8px 0;
+      font-size: 15px;
+      margin: 0 0 2px 0;
       font-weight: 700;
     }
     .field {
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 3px;
     }
     label {
       font-weight: 600;
-      font-size: 13px;
+      font-size: 12px;
       opacity: 0.8;
     }
     input {
       background: var(--bg);
       border: 1px solid var(--border);
       color: var(--text);
-      padding: 10px 12px;
-      border-radius: 8px;
-      font-size: 14px;
+      padding: 7px 10px;
+      border-radius: 6px;
+      font-size: 13px;
       outline: none;
       transition: border-color 0.2s;
     }
@@ -78,17 +80,17 @@ export const SETUP_UI_HTML = `
     .actions {
       display: flex;
       flex-direction: column;
-      gap: 8px;
-      margin-top: 8px;
+      gap: 6px;
+      margin-top: 4px;
     }
     button {
       background: var(--accent);
       color: white;
       border: none;
-      padding: 12px;
-      border-radius: 8px;
+      padding: 9px;
+      border-radius: 6px;
       font-weight: 600;
-      font-size: 14px;
+      font-size: 13px;
       cursor: pointer;
       transition: opacity 0.2s;
     }
@@ -97,9 +99,9 @@ export const SETUP_UI_HTML = `
       cursor: not-allowed;
     }
     .status {
-      font-size: 13px;
-      padding: 10px;
-      border-radius: 8px;
+      font-size: 12px;
+      padding: 7px 10px;
+      border-radius: 6px;
       display: none;
     }
     .status.error {
@@ -116,24 +118,78 @@ export const SETUP_UI_HTML = `
     }
     .loader {
       display: inline-block;
-      width: 16px;
-      height: 16px;
+      width: 14px;
+      height: 14px;
       border: 2px solid rgba(255,255,255,0.3);
       border-radius: 50%;
       border-top-color: #fff;
       animation: spin 1s ease-in-out infinite;
-      margin-right: 8px;
+      margin-right: 6px;
       vertical-align: middle;
     }
     @keyframes spin {
       to { transform: rotate(360deg); }
+    }
+    .success-card {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 8px;
+      padding: 18px 12px;
+      border-radius: 10px;
+      background: rgba(56, 142, 60, 0.08);
+      border: 1px solid rgba(56, 142, 60, 0.25);
+    }
+    .success-card.visible { display: flex; }
+    .check-circle {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: var(--success);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: pop 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.3);
+    }
+    .check-circle svg {
+      width: 32px;
+      height: 32px;
+      stroke: #fff;
+      stroke-width: 4;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-dasharray: 30;
+      stroke-dashoffset: 30;
+      animation: draw 0.4s ease-out 0.2s forwards;
+    }
+    .success-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--success);
+      margin: 0;
+    }
+    .success-sub {
+      font-size: 12px;
+      opacity: 0.75;
+      margin: 0;
+      word-break: break-all;
+    }
+    @keyframes pop {
+      0% { transform: scale(0); }
+      80% { transform: scale(1.08); }
+      100% { transform: scale(1); }
+    }
+    @keyframes draw {
+      to { stroke-dashoffset: 0; }
     }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Connect to MyChart</h1>
-    
+
     <div id="status" class="status"></div>
 
     <div id="setup-form">
@@ -144,22 +200,30 @@ export const SETUP_UI_HTML = `
 
       <div class="field">
         <label>Username</label>
-        <input type="text" id="username" placeholder="Enter your MyChart username">
+        <input type="text" id="username" placeholder="MyChart username">
       </div>
 
       <div class="field">
         <label>Password</label>
-        <input type="password" id="password" placeholder="Enter your MyChart password">
+        <input type="password" id="password" placeholder="MyChart password">
       </div>
 
-      <div id="2fa-section" class="field" style="display: none; margin-top: 8px;">
+      <div id="2fa-section" class="field" style="display: none;">
         <label>Verification Code</label>
-        <input type="text" id="2fa-code" placeholder="6-digit code from email/SMS" maxlength="6">
+        <input type="text" id="2fa-code" placeholder="6-digit code" maxlength="6">
       </div>
 
       <div class="actions">
         <button id="submit">Connect Account</button>
       </div>
+    </div>
+
+    <div id="success-card" class="success-card">
+      <div class="check-circle">
+        <svg viewBox="0 0 24 24"><polyline points="5 12.5 10 17.5 19 7.5"></polyline></svg>
+      </div>
+      <p class="success-title">Connected!</p>
+      <p class="success-sub" id="success-host"></p>
     </div>
   </div>
 
@@ -172,8 +236,17 @@ export const SETUP_UI_HTML = `
     const submitBtn = document.getElementById('submit');
     const statusDiv = document.getElementById('status');
     const setupForm = document.getElementById('setup-form');
-    
+    const successCard = document.getElementById('success-card');
+    const successHost = document.getElementById('success-host');
+
     let pendingId = null;
+
+    function showSuccess(account) {
+      hideStatus();
+      setupForm.style.display = 'none';
+      successHost.innerText = account ? 'Linked to ' + account : '';
+      successCard.classList.add('visible');
+    }
 
     function showStatus(msg, type = 'error') {
       statusDiv.innerText = msg;
@@ -184,29 +257,79 @@ export const SETUP_UI_HTML = `
       statusDiv.style.display = 'none';
     }
 
-    function looksLikeHostname(value) {
-      return value.includes('.') || value.includes('://');
-    }
+    // ── MCP Apps JSON-RPC bridge (wire protocol per @modelcontextprotocol/ext-apps) ──
+    const MCP_APP_PROTOCOL_VERSION = '2026-01-26';
+    let nextRpcId = 0;
+    const pendingRpc = new Map();
+    let handshakeDone = null;
 
-    async function resolveHostname(value, callTool) {
-      const trimmed = value.trim();
-      if (looksLikeHostname(trimmed)) {
-        return trimmed.replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '');
+    window.addEventListener('message', (event) => {
+      if (event.source !== window.parent) return;
+      const msg = event.data;
+      if (!msg || msg.jsonrpc !== '2.0') return;
+      if (msg.id != null && pendingRpc.has(msg.id)) {
+        const { resolve, reject } = pendingRpc.get(msg.id);
+        pendingRpc.delete(msg.id);
+        if (msg.error) reject(new Error(msg.error.message || 'RPC error'));
+        else resolve(msg.result);
       }
+    });
 
-      const result = await callTool('search_mycharts', { query: trimmed, limit: 1 });
-      const match = result && Array.isArray(result.matches) ? result.matches[0] : null;
-      return match ? match.hostname : '';
+    function rpc(method, params) {
+      const id = nextRpcId++;
+      return new Promise((resolve, reject) => {
+        pendingRpc.set(id, { resolve, reject });
+        window.parent.postMessage({ jsonrpc: '2.0', id, method, params }, '*');
+      });
     }
+
+    function notify(method, params) {
+      window.parent.postMessage({ jsonrpc: '2.0', method, params }, '*');
+    }
+
+    async function ensureHandshake() {
+      if (!handshakeDone) {
+        handshakeDone = (async () => {
+          await rpc('ui/initialize', {
+            appInfo: { name: 'openrecord-setup', version: '0.1.0' },
+            appCapabilities: {},
+            protocolVersion: MCP_APP_PROTOCOL_VERSION,
+          });
+          notify('ui/notifications/initialized', {});
+        })();
+      }
+      return handshakeDone;
+    }
+
+    // Kick off the handshake immediately so the user's first click doesn't wait on it.
+    ensureHandshake().then(() => {
+      // Tell the host how tall we actually are so the iframe stops scrolling.
+      let lastH = 0;
+      let pending = 0;
+      const reportSize = () => {
+        const h = document.documentElement.scrollHeight;
+        if (h === lastH) return;
+        lastH = h;
+        notify('ui/notifications/size-changed', { height: h });
+      };
+      const schedule = () => {
+        if (pending) return;
+        pending = requestAnimationFrame(() => { pending = 0; reportSize(); });
+      };
+      schedule();
+      new ResizeObserver(schedule).observe(document.documentElement);
+    }).catch((err) => {
+      showStatus('Could not connect to host: ' + (err && err.message ? err.message : err));
+    });
 
     submitBtn.onclick = async () => {
-      const healthSystem = hostnameInput.value;
+      const hostname = hostnameInput.value;
       const username = usernameInput.value;
       const password = passwordInput.value;
       const code = twoFaInput.value;
 
-      if (!healthSystem) {
-        showStatus('Please enter your health system or MyChart hostname.');
+      if (!hostname) {
+        showStatus('Please enter your MyChart hostname.');
         return;
       }
       if (!username || !password) {
@@ -220,8 +343,9 @@ export const SETUP_UI_HTML = `
       submitBtn.innerHTML = '<span class="loader"></span> Connecting...';
 
       try {
+        await ensureHandshake();
         const callTool = async (name, args) => {
-          const result = await window.mcp.callTool(name, args);
+          const result = await rpc('tools/call', { name, arguments: args });
           if (result && result.content && Array.isArray(result.content)) {
             const textContent = result.content.find(c => c.type === 'text');
             if (textContent) {
@@ -245,8 +369,7 @@ export const SETUP_UI_HTML = `
           }
           const result = await callTool('complete_2fa', { pending_id: pendingId, code });
           if (result.state === 'logged_in') {
-            showStatus('Successfully connected! You can now close this widget.', 'success');
-            setupForm.style.display = 'none';
+            showSuccess(result.account);
           } else if (result.state === 'invalid_2fa') {
             showStatus('Invalid verification code. Please try again.');
             pendingId = result.pending_id; // Update if refreshed
@@ -259,14 +382,6 @@ export const SETUP_UI_HTML = `
           }
         } else {
           // Initial Login
-          const hostname = await resolveHostname(healthSystem, callTool);
-          if (!hostname) {
-            showStatus('Could not find that health system. Try entering the MyChart hostname directly.');
-            submitBtn.disabled = false;
-            submitBtn.innerText = 'Connect Account';
-            return;
-          }
-
           const result = await callTool('setup_account', { hostname, username, password });
           
           if (result.state === 'need_2fa') {
@@ -276,8 +391,7 @@ export const SETUP_UI_HTML = `
             submitBtn.disabled = false;
             submitBtn.innerText = 'Verify Code';
           } else if (result.state === 'logged_in') {
-            showStatus('Successfully connected! You can now close this widget.', 'success');
-            setupForm.style.display = 'none';
+            showSuccess(result.account || hostname);
           } else if (result.state === 'invalid_login') {
             showStatus('Invalid username or password. Please check your credentials.');
             submitBtn.disabled = false;
