@@ -176,6 +176,19 @@ export const SETUP_UI_HTML = `
       margin: 0;
       word-break: break-all;
     }
+    .success-hint {
+      font-size: 11px;
+      opacity: 0.7;
+      margin: 4px 0 0 0;
+    }
+    .success-hint kbd {
+      font-family: inherit;
+      font-size: 10px;
+      padding: 1px 5px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--bg);
+    }
     @keyframes pop {
       0% { transform: scale(0); }
       80% { transform: scale(1.08); }
@@ -224,6 +237,7 @@ export const SETUP_UI_HTML = `
       </div>
       <p class="success-title">Connected!</p>
       <p class="success-sub" id="success-host"></p>
+      <p class="success-hint">Press <kbd>Enter</kbd> in the chat to continue.</p>
     </div>
   </div>
 
@@ -246,6 +260,20 @@ export const SETUP_UI_HTML = `
       setupForm.style.display = 'none';
       successHost.innerText = account ? 'Linked to ' + account : '';
       successCard.classList.add('visible');
+      // Tell Claude to pick up the original task now that an account is connected.
+      // ui/message injects a user-role message into the conversation, which
+      // immediately triggers a model response — no need for the user to type.
+      const hostMsg = account
+        ? 'My MyChart account at ' + account + ' is now connected. Please continue with my original request.'
+        : 'My MyChart account is now connected. Please continue with my original request.';
+      rpc('ui/message', {
+        role: 'user',
+        content: [{ type: 'text', text: hostMsg }],
+      }).catch((err) => {
+        // Non-fatal — the model just won't auto-continue. The visual confirmation still appears.
+        // eslint-disable-next-line no-console
+        console.error('ui/message failed:', err && err.message ? err.message : err);
+      });
     }
 
     function showStatus(msg, type = 'error') {
