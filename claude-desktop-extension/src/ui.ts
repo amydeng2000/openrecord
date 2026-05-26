@@ -130,6 +130,80 @@ export const SETUP_UI_HTML = `
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
+    .combobox {
+      position: relative;
+    }
+    .results {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      margin: 4px 0 0 0;
+      padding: 4px 0;
+      list-style: none;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      max-height: 220px;
+      overflow-y: auto;
+      z-index: 10;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+    .results li {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .results li:hover,
+    .results li.active {
+      background: var(--hover);
+    }
+    .results li.loading,
+    .results li.empty {
+      cursor: default;
+      opacity: 0.7;
+      font-style: italic;
+      font-size: 12px;
+    }
+    .results li.loading:hover,
+    .results li.empty:hover {
+      background: transparent;
+    }
+    .results .row-text {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      flex: 1;
+    }
+    .results .row-name {
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .results .row-host {
+      font-size: 11px;
+      opacity: 0.65;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .results img.row-logo {
+      width: 18px;
+      height: 18px;
+      border-radius: 4px;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
+    .selected-hint {
+      font-size: 11px;
+      opacity: 0.7;
+      margin: 2px 0 0 0;
+      word-break: break-all;
+    }
     .success-card {
       display: none;
       flex-direction: column;
@@ -176,6 +250,19 @@ export const SETUP_UI_HTML = `
       margin: 0;
       word-break: break-all;
     }
+    .success-hint {
+      font-size: 11px;
+      opacity: 0.7;
+      margin: 4px 0 0 0;
+    }
+    .success-hint kbd {
+      font-family: inherit;
+      font-size: 10px;
+      padding: 1px 5px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--bg);
+    }
     @keyframes pop {
       0% { transform: scale(0); }
       80% { transform: scale(1.08); }
@@ -193,9 +280,11 @@ export const SETUP_UI_HTML = `
     <div id="status" class="status"></div>
 
     <div id="setup-form">
-      <div class="field">
+      <div class="field combobox">
         <label>Health System</label>
-        <input type="text" id="hostname" placeholder="e.g. mychart.example.org">
+        <input type="text" id="hostname" placeholder="Search hospital or clinic (e.g. 'Denver Health')" autocomplete="off">
+        <ul id="hostname-results" class="results" hidden></ul>
+        <p class="selected-hint" id="selected-hint" hidden></p>
       </div>
 
       <div class="field">
@@ -224,6 +313,7 @@ export const SETUP_UI_HTML = `
       </div>
       <p class="success-title">Connected!</p>
       <p class="success-sub" id="success-host"></p>
+      <p class="success-hint">Press <kbd>Enter</kbd> in the chat to continue.</p>
     </div>
   </div>
 
@@ -238,14 +328,31 @@ export const SETUP_UI_HTML = `
     const setupForm = document.getElementById('setup-form');
     const successCard = document.getElementById('success-card');
     const successHost = document.getElementById('success-host');
+    const resultsList = document.getElementById('hostname-results');
+    const selectedHint = document.getElementById('selected-hint');
 
     let pendingId = null;
+    let selectedHostname = null;
 
     function showSuccess(account) {
       hideStatus();
       setupForm.style.display = 'none';
       successHost.innerText = account ? 'Linked to ' + account : '';
       successCard.classList.add('visible');
+      // Tell Claude to pick up the original task now that an account is connected.
+      // ui/message injects a user-role message into the conversation, which
+      // immediately triggers a model response — no need for the user to type.
+      const hostMsg = account
+        ? 'My MyChart account at ' + account + ' is now connected. Please continue with my original request.'
+        : 'My MyChart account is now connected. Please continue with my original request.';
+      rpc('ui/message', {
+        role: 'user',
+        content: [{ type: 'text', text: hostMsg }],
+      }).catch((err) => {
+        // Non-fatal — the model just won't auto-continue. The visual confirmation still appears.
+        // eslint-disable-next-line no-console
+        console.error('ui/message failed:', err && err.message ? err.message : err);
+      });
     }
 
     function showStatus(msg, type = 'error') {
@@ -301,6 +408,139 @@ export const SETUP_UI_HTML = `
       return handshakeDone;
     }
 
+    async function callTool(name, args) {
+      await ensureHandshake();
+      const result = await rpc('tools/call', { name, arguments: args });
+      if (result && result.content && Array.isArray(result.content)) {
+        const textContent = result.content.find(c => c.type === 'text');
+        if (textContent) {
+          try { return JSON.parse(textContent.text); }
+          catch (e) { return textContent.text; }
+        }
+      }
+      return result;
+    }
+
+    // ── Hostname autocomplete (search_mycharts) ────────────────────────────
+    let searchEpoch = 0;
+    let searchDebounce = 0;
+
+    function hideResults() {
+      resultsList.hidden = true;
+      resultsList.innerHTML = '';
+    }
+
+    function renderResults(rows) {
+      resultsList.innerHTML = '';
+      if (rows.length === 0) {
+        const li = document.createElement('li');
+        li.className = 'empty';
+        li.innerText = 'No matches — or type the hostname directly.';
+        resultsList.appendChild(li);
+        resultsList.hidden = false;
+        return;
+      }
+      for (const r of rows) {
+        const li = document.createElement('li');
+
+        if (r.logoUrl) {
+          const img = document.createElement('img');
+          img.className = 'row-logo';
+          img.src = r.logoUrl;
+          img.alt = '';
+          img.onerror = () => { img.style.display = 'none'; };
+          li.appendChild(img);
+        }
+
+        const text = document.createElement('div');
+        text.className = 'row-text';
+        const name = document.createElement('span');
+        name.className = 'row-name';
+        name.innerText = r.name || r.hostname;
+        const host = document.createElement('span');
+        host.className = 'row-host';
+        host.innerText = r.hostname;
+        text.appendChild(name);
+        text.appendChild(host);
+        li.appendChild(text);
+
+        // mousedown beats input blur — selection lands before the dropdown is hidden.
+        li.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          selectInstance(r);
+        });
+        resultsList.appendChild(li);
+      }
+      resultsList.hidden = false;
+    }
+
+    function showLoading() {
+      resultsList.innerHTML = '';
+      const li = document.createElement('li');
+      li.className = 'loading';
+      li.innerText = 'Searching…';
+      resultsList.appendChild(li);
+      resultsList.hidden = false;
+    }
+
+    function selectInstance(r) {
+      selectedHostname = r.hostname;
+      hostnameInput.value = r.name || r.hostname;
+      selectedHint.innerText = 'Connecting to ' + r.hostname;
+      selectedHint.hidden = false;
+      hideResults();
+    }
+
+    function clearSelection() {
+      if (selectedHostname === null) return;
+      selectedHostname = null;
+      selectedHint.hidden = true;
+      selectedHint.innerText = '';
+    }
+
+    async function runSearch(query) {
+      const epoch = ++searchEpoch;
+      showLoading();
+      let res;
+      try {
+        res = await callTool('search_mycharts', { query, limit: 8 });
+      } catch (err) {
+        if (epoch !== searchEpoch) return;
+        hideResults();
+        return;
+      }
+      if (epoch !== searchEpoch) return; // a newer query is in flight; drop this response
+      const matches = (res && Array.isArray(res.matches)) ? res.matches : [];
+      renderResults(matches);
+    }
+
+    hostnameInput.addEventListener('input', () => {
+      clearSelection();
+      const q = hostnameInput.value.trim();
+      if (searchDebounce) clearTimeout(searchDebounce);
+      if (!q) {
+        searchEpoch++; // invalidate any in-flight response
+        hideResults();
+        return;
+      }
+      searchDebounce = setTimeout(() => runSearch(q), 200);
+    });
+
+    hostnameInput.addEventListener('focus', () => {
+      // Re-open the dropdown if the user re-focuses with a non-empty query and no selection.
+      if (!selectedHostname && hostnameInput.value.trim() && resultsList.children.length > 0) {
+        resultsList.hidden = false;
+      }
+    });
+
+    document.addEventListener('mousedown', (e) => {
+      if (!hostnameInput.parentElement.contains(e.target)) hideResults();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') hideResults();
+    });
+
     // Kick off the handshake immediately so the user's first click doesn't wait on it.
     ensureHandshake().then(() => {
       // Tell the host how tall we actually are so the iframe stops scrolling.
@@ -323,13 +563,13 @@ export const SETUP_UI_HTML = `
     });
 
     submitBtn.onclick = async () => {
-      const hostname = hostnameInput.value;
+      const hostname = (selectedHostname || hostnameInput.value).trim();
       const username = usernameInput.value;
       const password = passwordInput.value;
       const code = twoFaInput.value;
 
       if (!hostname) {
-        showStatus('Please enter your MyChart hostname.');
+        showStatus('Please enter your MyChart hostname or pick one from the list.');
         return;
       }
       if (!username || !password) {
@@ -343,22 +583,6 @@ export const SETUP_UI_HTML = `
       submitBtn.innerHTML = '<span class="loader"></span> Connecting...';
 
       try {
-        await ensureHandshake();
-        const callTool = async (name, args) => {
-          const result = await rpc('tools/call', { name, arguments: args });
-          if (result && result.content && Array.isArray(result.content)) {
-            const textContent = result.content.find(c => c.type === 'text');
-            if (textContent) {
-              try {
-                return JSON.parse(textContent.text);
-              } catch (e) {
-                return textContent.text;
-              }
-            }
-          }
-          return result;
-        };
-
         if (pendingId) {
           // Complete 2FA
           if (!code || code.length < 6) {

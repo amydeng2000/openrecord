@@ -114,26 +114,27 @@ function errorResult(message: string): ToolResult {
  * Best-effort: register a passkey on the just-logged-in session so future
  * launches skip the password + 2FA prompt entirely. Silently no-ops if a
  * passkey is already saved, or if the instance disables passkey registration.
- * Returns true iff a new passkey was saved.
+ * Returns { registered, reason } — reason explains why on failure so the
+ * outcome is visible in the tool result (stderr from this process is not
+ * captured by Claude Desktop's log).
  */
 async function tryAutoRegisterPasskey(
   hostname: string,
   session: MyChartRequest,
-): Promise<boolean> {
+): Promise<{ registered: boolean; reason?: string }> {
   const key = normalizeHostname(hostname);
-  if (readAccountPasskey(key)) return false;
+  if (readAccountPasskey(key)) {
+    return { registered: false, reason: 'already_saved' };
+  }
   try {
     const credential = await setupPasskey(session);
     if (!credential) {
-      process.stderr.write(`[openrecord:${key}] passkey auto-registration skipped (instance returned no credential)\n`);
-      return false;
+      return { registered: false, reason: 'instance_returned_no_credential' };
     }
     saveAccountPasskey(key, serializeCredential(credential));
-    process.stderr.write(`[openrecord:${key}] passkey auto-registered — future sessions will skip 2FA\n`);
-    return true;
+    return { registered: true };
   } catch (err) {
-    process.stderr.write(`[openrecord:${key}] passkey auto-registration failed: ${(err as Error).message}\n`);
-    return false;
+    return { registered: false, reason: `error: ${(err as Error).message}` };
   }
 }
 
@@ -297,14 +298,15 @@ export function registerAllTools(server: McpServer): void {
         if (result.state === 'logged_in') {
           upsertAccount({ hostname: normalizeHostname(hostname), username, password });
           await adoptSession(hostname, result.mychartRequest);
-          const passkeyRegistered = await tryAutoRegisterPasskey(hostname, result.mychartRequest);
+          const passkey = await tryAutoRegisterPasskey(hostname, result.mychartRequest);
           return jsonResult({
             state: 'logged_in',
             account: normalizeHostname(hostname),
-            passkey_registered: passkeyRegistered,
-            message: passkeyRegistered
+            passkey_registered: passkey.registered,
+            passkey_reason: passkey.reason ?? null,
+            message: passkey.registered
               ? 'Account connected and passkey saved — future sessions will skip the password and 2FA prompts.'
-              : 'Account connected. Future tool calls can pass this hostname as `account`.',
+              : `Account connected. Passkey auto-registration outcome: ${passkey.reason ?? 'unknown'}.`,
           });
         }
 
@@ -370,14 +372,15 @@ export function registerAllTools(server: McpServer): void {
         if (twoFa.state === 'logged_in') {
           upsertAccount({ hostname: pending.hostname, username: pending.username, password: pending.password });
           await adoptSession(pending.hostname, twoFa.mychartRequest);
-          const passkeyRegistered = await tryAutoRegisterPasskey(pending.hostname, twoFa.mychartRequest);
+          const passkey = await tryAutoRegisterPasskey(pending.hostname, twoFa.mychartRequest);
           return jsonResult({
             state: 'logged_in',
             account: pending.hostname,
-            passkey_registered: passkeyRegistered,
-            message: passkeyRegistered
+            passkey_registered: passkey.registered,
+            passkey_reason: passkey.reason ?? null,
+            message: passkey.registered
               ? 'Account connected and passkey saved — future sessions will skip the password and 2FA prompts.'
-              : 'Account connected. Future tool calls can pass this hostname as `account`.',
+              : `Account connected. Passkey auto-registration outcome: ${passkey.reason ?? 'unknown'}.`,
           });
         }
         if (twoFa.state === 'invalid_2fa') {
