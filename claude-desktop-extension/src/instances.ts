@@ -19,17 +19,32 @@ export interface Instance {
   hostname: string;
 }
 
+// Banner-style logo for the test entry, matching the wide aspect ratio of the
+// real Epic logos (~640x230) so it renders consistently in the picker. Inlined
+// as a data URI so it needs no network or AWS creds. Teal cross emblem +
+// "Springfield General Hospital" wordmark.
+const SPRINGFIELD_LOGO_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 110">' +
+  '<rect x="6" y="18" width="74" height="74" rx="14" fill="#0d9488"/>' +
+  '<rect x="35" y="33" width="16" height="44" rx="3" fill="#ffffff"/>' +
+  '<rect x="21" y="47" width="44" height="16" rx="3" fill="#ffffff"/>' +
+  '<text x="94" y="50" font-family="Helvetica,Arial,sans-serif" font-size="30" font-weight="700" fill="#1e3a8a">Springfield</text>' +
+  '<text x="94" y="84" font-family="Helvetica,Arial,sans-serif" font-size="22" font-weight="600" fill="#0d9488">General Hospital</text>' +
+  '</svg>';
+const SPRINGFIELD_LOGO = 'data:image/svg+xml;base64,' + Buffer.from(SPRINGFIELD_LOGO_SVG).toString('base64');
+
 /**
  * Test/demo entry pointing at the deployed fake-mychart sandbox. Lets users
  * (and developers) exercise the full connect flow with Homer Simpson fake data
  * without needing real Epic credentials. The "(test)" suffix makes it obvious
  * in the picker that this is not a real health system. Credentials:
- * `homer` / `donuts123`.
+ * `homer` / `donuts123`. Only surfaces when searched (e.g. "test", "springfield",
+ * "fake-mychart"); it is not shown as a default suggestion.
  */
 const FAKE_MYCHART_TEST: Instance = {
   name: 'Springfield General Hospital (test)',
   url: 'https://fake-mychart.fanpierlabs.com/MyChart/',
-  logoUrl: '',
+  logoUrl: SPRINGFIELD_LOGO,
   hostname: 'fake-mychart.fanpierlabs.com',
 };
 
@@ -48,19 +63,12 @@ const realInstances: Instance[] = (rawInstances as Array<{ name: string; url: st
   };
 }).filter(i => i.hostname);
 
-// The test entry is listed first so it surfaces as a default suggestion.
+// The test entry is listed first so it ranks ahead of any real "Springfield…"
+// match when searched, but it is NOT shown as a default suggestion.
 const all: Instance[] = [FAKE_MYCHART_TEST, ...realInstances];
 
 export function allInstances(): Instance[] {
   return all;
-}
-
-/**
- * Instances to surface as default suggestions before the user types anything
- * (currently just the fake-mychart test sandbox).
- */
-export function featuredInstances(): Instance[] {
-  return [FAKE_MYCHART_TEST];
 }
 
 /**

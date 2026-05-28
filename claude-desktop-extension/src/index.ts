@@ -28,7 +28,6 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { registerAllTools } from './tools';
 import { clearAllSessions } from './session-manager';
 import { buildSetupUiHtml, SETUP_UI_MIME_TYPE } from './ui';
-import { featuredInstances } from './instances';
 
 async function main(): Promise<void> {
   const server = new McpServer(
@@ -72,12 +71,8 @@ async function main(): Promise<void> {
 
   // ── Resources ─────────────────────────────────────────────────────────────
 
-  // Serve the interactive setup widget HTML. Featured instances (the
-  // fake-mychart test sandbox) are injected once at startup as default
-  // picker suggestions.
-  const setupHtml = buildSetupUiHtml(
-    featuredInstances().map(i => ({ hostname: i.hostname, name: i.name, logoUrl: i.logoUrl })),
-  );
+  // Serve the interactive setup widget HTML.
+  const setupHtml = buildSetupUiHtml();
   server.resource(
     'setup-ui',
     'ui://openrecord/setup',

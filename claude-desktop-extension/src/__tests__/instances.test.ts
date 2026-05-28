@@ -3,7 +3,6 @@ import {
   allInstances,
   searchInstances,
   findByHostname,
-  featuredInstances,
 } from '../instances';
 
 const FAKE_HOST = 'fake-mychart.fanpierlabs.com';
@@ -15,17 +14,21 @@ describe('instances catalog', () => {
     expect(allInstances().length).toBeGreaterThan(1000);
   });
 
-  test('includes the fake-mychart test entry, labeled "(test)"', () => {
+  test('includes the fake-mychart test entry, labeled "(test)" with a logo', () => {
     const fake = allInstances().find((i) => i.hostname === FAKE_HOST);
     expect(fake).toBeDefined();
     expect(fake!.name.toLowerCase()).toContain('(test)');
     expect(fake!.url).toContain(FAKE_HOST);
+    // Has a self-contained (data URI) banner logo so it renders like the others.
+    expect(fake!.logoUrl.startsWith('data:image/svg+xml')).toBe(true);
   });
 
-  test('featuredInstances() surfaces the fake-mychart test entry', () => {
-    const featured = featuredInstances();
-    expect(featured.length).toBeGreaterThan(0);
-    expect(featured.some((i) => i.hostname === FAKE_HOST)).toBe(true);
+  test('real instances prefer the public Epic logo over the private S3 mirror', () => {
+    // The S3 mirror (s3.amazonaws.com) 403s without AWS creds; the Epic CDN
+    // (ichart2.epic.com) is public. A real entry should use the Epic URL.
+    const real = allInstances().find((i) => i.logoUrl.includes('ichart2.epic.com'));
+    expect(real).toBeDefined();
+    expect(allInstances().some((i) => i.logoUrl.includes('s3.us-east-2.amazonaws.com'))).toBe(false);
   });
 });
 

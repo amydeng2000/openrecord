@@ -1,24 +1,16 @@
 export const SETUP_UI_MIME_TYPE = 'text/html;profile=mcp-app';
 
-/** Minimal instance shape the picker needs to render a row + populate step 2. */
-export interface PickerInstance {
-  hostname: string;
-  name: string;
-  logoUrl: string;
-}
-
 /**
  * Interactive Setup Widget for OpenRecord.
  *
- * Served via the MCP Apps ui:// protocol. Two-step flow:
- *   1. Pick a health system from an autocomplete dropdown (the user must
- *      choose an entry — free-text hostnames are not accepted).
+ * Served via the MCP Apps ui:// protocol. Step-based flow:
+ *   1. Pick a health system from an autocomplete dropdown (results appear only
+ *      after the user types; they must choose an entry — free-text hostnames
+ *      are not accepted).
  *   2. Enter MyChart credentials for the chosen system; submitting fires the
- *      real login scrapers via setup_account / complete_2fa.
- *
- * `__FEATURED_JSON__` is replaced at build time with the featured instances
- * (the fake-mychart test sandbox) so the picker can show a default suggestion
- * before the user types.
+ *      real login scrapers via setup_account.
+ *   3. Two-step verification — only reached when setup_account reports
+ *      need_2fa; the code is completed via complete_2fa.
  */
 const SETUP_UI_TEMPLATE = `
 <!DOCTYPE html>
@@ -221,51 +213,60 @@ const SETUP_UI_TEMPLATE = `
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    /* Logo always reserves a fixed box on the left so names align whether or
-       not a logo loads. .row-logo-empty paints a neutral placeholder. */
+    /* MyChart logos are wide banners (~640x230), so the slot is a banner-shaped
+       rectangle. A white backing keeps dark-text logos legible in dark mode.
+       The slot is fixed-size so names stay aligned whether or not a logo loads;
+       .row-logo-empty paints a neutral placeholder for entries with no logo. */
     .results img.row-logo {
-      width: 20px;
-      height: 20px;
+      width: 56px;
+      height: 26px;
       border-radius: 4px;
       object-fit: contain;
-      background: var(--hover);
+      background: #ffffff;
+      padding: 1px 3px;
+      box-sizing: border-box;
       flex-shrink: 0;
     }
     .results img.row-logo-empty {
       background: var(--hover);
+      padding: 0;
       border: 1px solid var(--border);
     }
+    /* Pages 2 & 3: the chosen system's banner sits prominently above the
+       inputs, with the hostname beneath it (centered column). */
     .instance-header {
       display: flex;
+      flex-direction: column;
       align-items: center;
-      gap: 10px;
-      padding: 10px;
+      text-align: center;
+      gap: 6px;
+      padding: 14px 12px;
       border: 1px solid var(--border);
       border-radius: 8px;
       background: var(--hover);
     }
     .instance-logo {
-      width: 40px;
-      height: 40px;
-      border-radius: 6px;
+      max-width: 230px;
+      width: auto;
+      height: 48px;
       object-fit: contain;
-      background: var(--bg);
-      flex-shrink: 0;
+      background: #ffffff;
+      border-radius: 6px;
+      padding: 4px 10px;
+      box-sizing: border-box;
     }
-    .instance-text { min-width: 0; flex: 1; }
     .instance-name {
       font-weight: 700;
-      font-size: 14px;
+      font-size: 15px;
+      max-width: 100%;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .instance-host {
-      font-size: 11px;
-      opacity: 0.65;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+    .field-error {
+      color: var(--error);
+      font-size: 12px;
+      margin: 2px 0 0 0;
     }
     .success-card {
       display: none;
@@ -357,10 +358,7 @@ const SETUP_UI_TEMPLATE = `
 
       <div class="instance-header">
         <img id="instance-logo" class="instance-logo" alt="">
-        <div class="instance-text">
-          <div class="instance-name" id="instance-name"></div>
-          <div class="instance-host" id="instance-host"></div>
-        </div>
+        <div class="instance-name" id="instance-name"></div>
       </div>
 
       <div class="field">
@@ -375,6 +373,7 @@ const SETUP_UI_TEMPLATE = `
 
       <div class="actions">
         <button id="submit">Connect Account</button>
+        <p class="field-error" id="creds-error" hidden></p>
       </div>
     </div>
 
@@ -384,10 +383,7 @@ const SETUP_UI_TEMPLATE = `
 
       <div class="instance-header">
         <img id="instance-logo-2fa" class="instance-logo" alt="">
-        <div class="instance-text">
-          <div class="instance-name" id="instance-name-2fa"></div>
-          <div class="instance-host" id="instance-host-2fa"></div>
-        </div>
+        <div class="instance-name" id="instance-name-2fa"></div>
       </div>
 
       <p class="step-sub" id="twofa-hint">Enter the 6-digit verification code to finish signing in.</p>
@@ -399,6 +395,7 @@ const SETUP_UI_TEMPLATE = `
 
       <div class="actions">
         <button id="verify">Verify Code</button>
+        <p class="field-error" id="twofa-error" hidden></p>
       </div>
     </div>
 
@@ -415,8 +412,6 @@ const SETUP_UI_TEMPLATE = `
 
   <script>
     // Featured suggestions (e.g. the fake-mychart test sandbox), injected at build time.
-    var FEATURED = __FEATURED_JSON__;
-
     var titleEl = document.getElementById('title');
     var statusDiv = document.getElementById('status');
     var stepPicker = document.getElementById('step-picker');
@@ -428,16 +423,16 @@ const SETUP_UI_TEMPLATE = `
     var back2faBtn = document.getElementById('back-2fa');
     var instanceLogo = document.getElementById('instance-logo');
     var instanceName = document.getElementById('instance-name');
-    var instanceHost = document.getElementById('instance-host');
     var instanceLogo2fa = document.getElementById('instance-logo-2fa');
     var instanceName2fa = document.getElementById('instance-name-2fa');
-    var instanceHost2fa = document.getElementById('instance-host-2fa');
     var twoFaHint = document.getElementById('twofa-hint');
     var usernameInput = document.getElementById('username');
     var passwordInput = document.getElementById('password');
     var twoFaInput = document.getElementById('2fa-code');
     var submitBtn = document.getElementById('submit');
     var verifyBtn = document.getElementById('verify');
+    var credsError = document.getElementById('creds-error');
+    var twoFaError = document.getElementById('twofa-error');
     var successCard = document.getElementById('success-card');
     var successHost = document.getElementById('success-host');
 
@@ -460,18 +455,23 @@ const SETUP_UI_TEMPLATE = `
       titleEl.innerText = STEP_TITLES[step] || STEP_TITLES.picker;
     }
 
-    // Paint an instance logo into the given <img>, hiding it if there's no
-    // usable logo (e.g. the fake-mychart test entry, or a load failure).
-    function paintLogo(img, logoUrl) {
-      if (logoUrl) {
-        img.src = logoUrl;
-        img.style.display = '';
-        img.onerror = function () { img.style.display = 'none'; };
+    // Fill an instance header: the system's banner logo above its full name.
+    // No hostname. If the logo is missing or fails to load, just the name shows.
+    function fillHeader(logoImg, nameEl, inst) {
+      nameEl.innerText = (inst && (inst.name || inst.hostname)) || '';
+      if (inst && inst.logoUrl) {
+        logoImg.src = inst.logoUrl;
+        logoImg.style.display = '';
+        logoImg.onerror = function () { logoImg.style.display = 'none'; };
       } else {
-        img.style.display = 'none';
-        img.removeAttribute('src');
+        logoImg.style.display = 'none';
+        logoImg.removeAttribute('src');
       }
     }
+
+    // Inline error label shown directly beneath a step's action button.
+    function showError(el, msg) { el.innerText = msg; el.hidden = false; }
+    function clearError(el) { el.innerText = ''; el.hidden = true; }
 
     function showStatus(msg, type) {
       statusDiv.innerText = msg;
@@ -621,11 +621,6 @@ const SETUP_UI_TEMPLATE = `
       resultsList.hidden = false;
     }
 
-    function showFeatured() {
-      if (FEATURED && FEATURED.length) renderRows(FEATURED);
-      else hideResults();
-    }
-
     async function runSearch(query) {
       var epoch = ++searchEpoch;
       showLoading();
@@ -645,18 +640,20 @@ const SETUP_UI_TEMPLATE = `
     searchInput.addEventListener('input', function () {
       var q = searchInput.value.trim();
       if (searchDebounce) clearTimeout(searchDebounce);
+      // Nothing is shown until the user actually types a query — no default
+      // suggestions on focus/empty.
       if (!q) {
         searchEpoch++; // invalidate any in-flight response
-        showFeatured();
+        hideResults();
         return;
       }
       searchDebounce = setTimeout(function () { runSearch(q); }, 180);
     });
 
     searchInput.addEventListener('focus', function () {
-      var q = searchInput.value.trim();
-      if (!q) showFeatured();
-      else if (currentRows.length) resultsList.hidden = false;
+      // Re-open existing results if the user refocuses a non-empty query;
+      // an empty box stays closed.
+      if (searchInput.value.trim() && currentRows.length) resultsList.hidden = false;
     });
 
     searchInput.addEventListener('keydown', function (e) {
@@ -685,10 +682,7 @@ const SETUP_UI_TEMPLATE = `
       selectedInstance = r;
       hideResults();
 
-      var label = r.name || r.hostname;
-      paintLogo(instanceLogo, r.logoUrl);
-      instanceName.innerText = label;
-      instanceHost.innerText = r.hostname;
+      fillHeader(instanceLogo, instanceName, r);
 
       // Reset credential state for a clean step 2.
       pendingId = null;
@@ -697,6 +691,7 @@ const SETUP_UI_TEMPLATE = `
       twoFaInput.value = '';
       submitBtn.disabled = false;
       submitBtn.innerText = 'Connect Account';
+      clearError(credsError);
       hideStatus();
 
       showStep('creds');
@@ -713,16 +708,14 @@ const SETUP_UI_TEMPLATE = `
 
     // Move to the dedicated 2FA step once setup_account reports need_2fa.
     function showTwoFa(delivery) {
-      var r = selectedInstance || {};
-      paintLogo(instanceLogo2fa, r.logoUrl);
-      instanceName2fa.innerText = r.name || r.hostname || '';
-      instanceHost2fa.innerText = r.hostname || '';
+      fillHeader(instanceLogo2fa, instanceName2fa, selectedInstance || {});
       twoFaHint.innerText = delivery
         ? 'Enter the 6-digit code sent to ' + delivery + ' to finish signing in.'
         : 'Enter the 6-digit verification code to finish signing in.';
       twoFaInput.value = '';
       verifyBtn.disabled = false;
       verifyBtn.innerText = 'Verify Code';
+      clearError(twoFaError);
       showStep('twofa');
       twoFaInput.focus();
     }
@@ -734,6 +727,7 @@ const SETUP_UI_TEMPLATE = `
     back2faBtn.onclick = function () {
       pendingId = null;
       hideStatus();
+      clearError(credsError);
       submitBtn.disabled = false;
       submitBtn.innerText = 'Connect Account';
       showStep('creds');
@@ -769,12 +763,20 @@ const SETUP_UI_TEMPLATE = `
       var username = usernameInput.value;
       var password = passwordInput.value;
 
-      if (!username || !password) {
-        showStatus('Please enter both username and password.');
+      var missingUser = !username;
+      var missingPass = !password;
+      if (missingUser || missingPass) {
+        showError(
+          credsError,
+          missingUser && missingPass ? 'Enter your username and password.'
+            : missingUser ? 'Enter your username.'
+            : 'Enter your password.',
+        );
+        (missingUser ? usernameInput : passwordInput).focus();
         return;
       }
 
-      hideStatus();
+      clearError(credsError);
       submitBtn.disabled = true;
       submitBtn.innerHTML = '<span class="loader"></span> Connecting...';
 
@@ -790,16 +792,16 @@ const SETUP_UI_TEMPLATE = `
         } else if (result.state === 'logged_in') {
           showSuccess(result.account || hostname);
         } else if (result.state === 'invalid_login') {
-          showStatus('Invalid username or password. Please check your credentials.');
+          showError(credsError, 'Invalid username or password. Please check your credentials.');
           submitBtn.disabled = false;
           submitBtn.innerText = 'Connect Account';
         } else {
-          showStatus(result.message || 'Login failed. Please try again.');
+          showError(credsError, result.message || 'Login failed. Please try again.');
           submitBtn.disabled = false;
           submitBtn.innerText = 'Connect Account';
         }
       } catch (e) {
-        showStatus('Error: ' + (e && e.message ? e.message : e));
+        showError(credsError, 'Error: ' + (e && e.message ? e.message : e));
         submitBtn.disabled = false;
         submitBtn.innerText = 'Connect Account';
       }
@@ -810,11 +812,12 @@ const SETUP_UI_TEMPLATE = `
       if (!pendingId) { back2faBtn.onclick(); return; }
       var code = (twoFaInput.value || '').trim();
       if (code.length < 6) {
-        showStatus('Please enter the 6-digit verification code.');
+        showError(twoFaError, 'Enter the 6-digit verification code.');
+        twoFaInput.focus();
         return;
       }
 
-      hideStatus();
+      clearError(twoFaError);
       verifyBtn.disabled = true;
       verifyBtn.innerHTML = '<span class="loader"></span> Verifying...';
 
@@ -823,22 +826,27 @@ const SETUP_UI_TEMPLATE = `
         if (result.state === 'logged_in') {
           showSuccess(result.account || (selectedInstance && selectedInstance.hostname));
         } else if (result.state === 'invalid_2fa') {
-          showStatus('Invalid verification code. Please try again.');
+          showError(twoFaError, 'Invalid verification code. Please try again.');
           pendingId = result.pending_id; // refreshed pending id
           verifyBtn.disabled = false;
           verifyBtn.innerText = 'Verify Code';
           twoFaInput.focus();
         } else {
-          showStatus(result.message || ('Unexpected state: ' + result.state));
+          showError(twoFaError, result.message || ('Unexpected state: ' + result.state));
           verifyBtn.disabled = false;
           verifyBtn.innerText = 'Verify Code';
         }
       } catch (e) {
-        showStatus('Error: ' + (e && e.message ? e.message : e));
+        showError(twoFaError, 'Error: ' + (e && e.message ? e.message : e));
         verifyBtn.disabled = false;
         verifyBtn.innerText = 'Verify Code';
       }
     };
+
+    // Clear the inline error as soon as the user starts correcting the input.
+    usernameInput.addEventListener('input', function () { clearError(credsError); });
+    passwordInput.addEventListener('input', function () { clearError(credsError); });
+    twoFaInput.addEventListener('input', function () { clearError(twoFaError); });
 
     // Submit on Enter from the relevant fields.
     passwordInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); submitBtn.click(); } });
@@ -869,11 +877,7 @@ const SETUP_UI_TEMPLATE = `
 </html>
 `;
 
-/**
- * Build the setup widget HTML, injecting `featured` instances as default
- * picker suggestions. Uses a function replacer so `$` sequences in the JSON
- * are not treated as replacement patterns.
- */
-export function buildSetupUiHtml(featured: PickerInstance[] = []): string {
-  return SETUP_UI_TEMPLATE.replace('__FEATURED_JSON__', () => JSON.stringify(featured));
+/** The setup widget HTML, served as the ui://openrecord/setup resource. */
+export function buildSetupUiHtml(): string {
+  return SETUP_UI_TEMPLATE;
 }

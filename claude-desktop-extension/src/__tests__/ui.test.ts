@@ -27,33 +27,18 @@ describe('buildSetupUiHtml', () => {
     expect(buildSetupUiHtml()).toContain('[hidden] { display: none !important; }');
   });
 
-  test('fully replaces the featured placeholder (default = empty array)', () => {
+  test('has inline error labels beneath each action button', () => {
+    const html = buildSetupUiHtml();
+    expect(html).toContain('id="creds-error"');
+    expect(html).toContain('id="twofa-error"');
+    expect(html).toContain('class="field-error"');
+  });
+
+  test('does not show default picker suggestions (no featured list)', () => {
     const html = buildSetupUiHtml();
     expect(html).not.toContain('__FEATURED_JSON__');
-    expect(html).toContain('var FEATURED = [];');
-  });
-
-  test('injects featured instances as JSON', () => {
-    const html = buildSetupUiHtml([
-      { hostname: 'fake-mychart.fanpierlabs.com', name: 'Springfield General Hospital (test)', logoUrl: '' },
-    ]);
-    expect(html).not.toContain('__FEATURED_JSON__');
-    expect(html).toContain('fake-mychart.fanpierlabs.com');
-    expect(html).toContain('Springfield General Hospital (test)');
-    // The injected literal must be valid embedded JSON.
-    const match = html.match(/var FEATURED = (\[.*?\]);/s);
-    expect(match).not.toBeNull();
-    const parsed = JSON.parse(match![1]);
-    expect(parsed[0].hostname).toBe('fake-mychart.fanpierlabs.com');
-  });
-
-  test('does not let "$" sequences in data corrupt the injection', () => {
-    const html = buildSetupUiHtml([
-      { hostname: 'h.example', name: 'Cost $5 & $$ Clinic', logoUrl: '' },
-    ]);
-    const match = html.match(/var FEATURED = (\[.*?\]);/s);
-    expect(match).not.toBeNull();
-    const parsed = JSON.parse(match![1]);
-    expect(parsed[0].name).toBe('Cost $5 & $$ Clinic');
+    expect(html).not.toContain('FEATURED');
+    // Empty/focus state hides results rather than rendering a default list.
+    expect(html).toContain('hideResults();');
   });
 });

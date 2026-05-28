@@ -23,20 +23,29 @@ After installing, open a new Claude chat and say:
 
 ### Interactive widget (recommended)
 
-In Claude Desktop, Claude shows an inline **two-step setup widget**
+In Claude Desktop, Claude shows an inline **step-based setup widget**
 (`get_setup_widget`):
 
 1. **Pick a health system** — an autocomplete dropdown over the full MyChart
-   directory. Each result shows the system's logo on the left. You must choose
-   an entry from the list (free-text hostnames aren't accepted). The
-   **Springfield General Hospital (test)** entry points at the
-   `fake-mychart.fanpierlabs.com` sandbox (Homer Simpson fake data, no real
-   credentials needed — sign in with `homer` / `donuts123`) and appears as a
-   default suggestion.
-2. **Sign in** — the chosen system's logo and name are shown, followed by
-   username + password fields. Submitting runs the real login scrapers via
-   `setup_account`; if the portal requires it, a 2FA code field appears and is
-   completed via `complete_2fa`.
+   directory. Results appear only once you type (no default list); each shows
+   the system's banner logo. You must choose an entry from the list (free-text
+   hostnames aren't accepted). Search **test**, **springfield**, or
+   **fake-mychart** to find the **Springfield General Hospital (test)** entry,
+   which points at the `fake-mychart.fanpierlabs.com` sandbox (Homer Simpson
+   fake data, no real credentials needed — sign in with `homer` / `donuts123`).
+2. **Sign in** — the chosen system's logo sits above username + password
+   fields. Submitting runs the real login scrapers via `setup_account`.
+   Validation/login errors show inline beneath the button.
+3. **Two-step verification** — shown only if `setup_account` reports the portal
+   requires a code; entering it calls `complete_2fa`.
+
+> **Logos.** MyChart's only per-instance brand asset is the wide banner logo
+> (`ichart2.epic.com`, ~640×230), so the widget uses it everywhere — a
+> banner-shaped slot in the dropdown and a banner above the inputs on the
+> sign-in / 2FA steps. Square favicons aren't used: ~half of instances are
+> multi-tenant (many orgs share one host, e.g. 200+ on `mychart.ochin.org`) and
+> favicons are per-host, so they can't distinguish those orgs; most are also
+> just the generic Epic icon.
 
 ### Tool-call fallback
 
