@@ -13,6 +13,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { convertCloToBitmap16 } from '../../../../scrapers/myChart/clo-image-parser/clo_to_bitmap';
 import { encodeCloAsJpeg } from '../jpeg-encoder';
+import { encodeImageId, decodeImageId } from '../download-study';
 
 const CLO_DIR = join(__dirname, '../../../../fake-mychart/src/data/clo-images');
 
@@ -44,7 +45,22 @@ describe('CLO → JPEG encode path', () => {
     expect(encoded.buffer[encoded.buffer.length - 1]).toBe(0xd9);
   });
 
-  it('encodes a skull X-ray fixture without the wrapper metadata too', () => {
+  it('round-trips an image_id through encode/decode', () => {
+    const ctx = { fdi: 'FDI-XRAY-001', ord: 'ORD-XRAY-001' };
+    const id = encodeImageId(ctx);
+    // base64url: no '+', '/', or '=' that would trip up URL/arg handling.
+    expect(id).not.toMatch(/[+/=]/);
+    expect(decodeImageId(id)).toEqual(ctx);
+  });
+
+  it('rejects a malformed image_id', () => {
+    expect(() => decodeImageId('not-a-valid-token')).toThrow();
+    // valid base64url but not the expected {fdi, ord} shape
+    const bad = Buffer.from(JSON.stringify({ nope: 1 }), 'utf8').toString('base64url');
+    expect(() => decodeImageId(bad)).toThrow();
+  });
+
+  it('encodes a skull X-ray fixture without the wrapper metadata (pixels only)', () => {
     const { pixel } = readClo('skull_ap');
 
     // wrapperData is optional — convertCloToBitmap16 must still decode pixels.

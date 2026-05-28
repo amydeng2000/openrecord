@@ -15,6 +15,8 @@ import { getImagingResults } from '../../../../scrapers/myChart/labs_and_procedu
 import type { MyChartRequest } from '../../../../scrapers/myChart/myChartRequest';
 import { downloadStudyJpegs } from '../download-study';
 
+// Assumes a fake-mychart server is running at FAKE_MYCHART_HOST (CI starts one;
+// locally run `cd fake-mychart && bun run dev`). Fails loudly if it isn't.
 const HOST = process.env.FAKE_MYCHART_HOST ?? 'localhost:4000';
 
 let session: MyChartRequest;

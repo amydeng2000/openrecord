@@ -33,6 +33,36 @@ export interface DownloadStudyJpegsResult {
   errors: string[];
 }
 
+/**
+ * Pack an FdiContext into a single opaque `image_id` token (base64url of the
+ * JSON). One copy-paste value is easier for the model to round-trip from
+ * get_imaging_results into download_imaging_study than two separate fields,
+ * and base64url avoids delimiter collisions — `fdi`/`ord` are arbitrary
+ * URL-encoded tokens that could contain a colon, comma, etc.
+ */
+export function encodeImageId(fdiContext: FdiContext): string {
+  return Buffer.from(JSON.stringify({ fdi: fdiContext.fdi, ord: fdiContext.ord }), 'utf8').toString('base64url');
+}
+
+/** Inverse of encodeImageId. Throws if the token is malformed. */
+export function decodeImageId(imageId: string): FdiContext {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.from(imageId, 'base64url').toString('utf8'));
+  } catch {
+    throw new Error('Invalid image_id — expected the image_id value from a get_imaging_results entry.');
+  }
+  if (
+    !parsed ||
+    typeof parsed !== 'object' ||
+    typeof (parsed as FdiContext).fdi !== 'string' ||
+    typeof (parsed as FdiContext).ord !== 'string'
+  ) {
+    throw new Error('Invalid image_id — expected the image_id value from a get_imaging_results entry.');
+  }
+  return { fdi: (parsed as FdiContext).fdi, ord: (parsed as FdiContext).ord };
+}
+
 export interface DownloadStudyJpegsOptions {
   studyName?: string;
   /** Max images to download and encode (default 3). */

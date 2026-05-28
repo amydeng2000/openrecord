@@ -85,8 +85,8 @@ bun run pack       # build + run `mcpb pack` → openrecord.mcpb
 > **Type checking.** tsup bundles with esbuild, which strips types without
 > checking them — so type errors (wrong function arguments, missing fields)
 > compile clean and only blow up at runtime. `bun run build` now runs
-> `tsc --noEmit` first so those are caught at build time and in CI. Tests under
-> `src/**/__tests__/` are excluded from the `tsc` gate (they run under `bun`).
+> `tsc --noEmit` first so those are caught at build time and in CI. Tests are
+> type-checked too (`@types/bun` provides the `bun:test` types).
 
 ### Hot-reload dev loop (recommended)
 

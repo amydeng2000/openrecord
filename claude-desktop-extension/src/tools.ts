@@ -87,7 +87,7 @@ import {
   findAccount,
 } from './credential-store';
 import { addPending, takePending } from './pending-logins';
-import { downloadStudyJpegs } from './imaging/download-study';
+import { downloadStudyJpegs, encodeImageId, decodeImageId } from './imaging/download-study';
 
 // ── Result helpers ──────────────────────────────────────────────────────────
 
@@ -498,7 +498,17 @@ export function registerAllTools(server: McpServer): void {
   // ── Results ───────────────────────────────────────────────────────────────
 
   registerScraperTool(server, 'get_lab_results', 'Lab results with reference ranges and trending.', {}, (req) => listLabResults(req));
-  registerScraperTool(server, 'get_imaging_results', 'Imaging results metadata (X-ray, MRI, CT, US, etc.). Each entry that has viewable images carries an `fdiContext: { fdi, ord }` — pass those two values to download_imaging_study to get the actual images.', {}, (req) => getImagingResults(req));
+  registerScraperTool(server, 'get_imaging_results', 'Imaging results metadata (X-ray, MRI, CT, US, etc.). Each entry that has viewable images carries an `image_id` — pass that single value to download_imaging_study to get the actual images.', {}, async (req) => {
+    const results = await getImagingResults(req);
+    // Expose a single opaque `image_id` per study instead of the raw
+    // { fdi, ord } pair — one copy-paste token is easier for the model to
+    // hand to download_imaging_study without mixing the two fields up.
+    return results.map((r) => {
+      if (!r.fdiContext) return r;
+      const { fdiContext, ...rest } = r;
+      return { ...rest, image_id: encodeImageId(fdiContext) };
+    });
+  });
 
   server.registerTool(
     'download_imaging_study',
@@ -506,12 +516,11 @@ export function registerAllTools(server: McpServer): void {
       title: 'Download imaging study',
       description:
         'Download a single imaging study (X-ray, CT, MRI, ultrasound, etc.) and return the actual images as JPEGs that render inline in the conversation. ' +
-        "Get `fdi` and `ord` from the `fdiContext` object on an entry returned by get_imaging_results. " +
+        'Pass the `image_id` from the chosen get_imaging_results entry. ' +
         'Images are downloaded and encoded locally on the user’s machine (pure-JS CLO→JPEG, no native dependency).',
       inputSchema: {
         account: z.string().describe('MyChart hostname (the "account" / "account_id" — get the exact value from list_accounts).'),
-        fdi: z.string().describe('fdiContext.fdi from the chosen get_imaging_results entry.'),
-        ord: z.string().describe('fdiContext.ord from the chosen get_imaging_results entry.'),
+        image_id: z.string().describe('The `image_id` value from the chosen get_imaging_results entry. Copy it verbatim.'),
         study_name: z.string().optional().describe('Human-readable study name for labeling (e.g. the orderName). Optional.'),
         max_images: z.number().int().min(1).max(20).optional().describe('Maximum number of images to download and return (default 3).'),
         jpeg_quality: z.number().int().min(1).max(100).optional().describe('JPEG quality 1-100 (default 85).'),
@@ -521,14 +530,14 @@ export function registerAllTools(server: McpServer): void {
     async (args) => {
       try {
         const account = typeof args.account === 'string' ? args.account : '';
-        const fdi = typeof args.fdi === 'string' ? args.fdi : '';
-        const ord = typeof args.ord === 'string' ? args.ord : '';
+        const imageId = typeof args.image_id === 'string' ? args.image_id : '';
         const studyName = typeof args.study_name === 'string' ? args.study_name : undefined;
         const maxImages = typeof args.max_images === 'number' ? args.max_images : undefined;
         const jpegQuality = typeof args.jpeg_quality === 'number' ? args.jpeg_quality : undefined;
 
+        const fdiContext = decodeImageId(imageId);
         const session = await resolveSession(account);
-        const result = await downloadStudyJpegs(session, { fdi, ord }, {
+        const result = await downloadStudyJpegs(session, fdiContext, {
           studyName,
           maxImages,
           jpegQuality,

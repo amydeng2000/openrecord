@@ -28,8 +28,8 @@ jobs:
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
       - run: bun run test
-      - name: Typecheck, build & unit-test Claude Desktop extension
-        run: cd claude-desktop-extension && bun install && bun run build && bun test src/imaging/__tests__/encode.test.ts
+      - name: Typecheck & build Claude Desktop extension
+        run: cd claude-desktop-extension && bun install && bun run build
       - run: cd web && bun --bun next build
       - run: docker build .
         timeout-minutes: 20
@@ -110,8 +110,8 @@ jobs:
           done
       - name: Run scrapers against fake-mychart
         run: bun run test:fake-mychart
-      - name: Run Claude Desktop extension imaging download test
-        run: cd claude-desktop-extension && bun install && bun test src/imaging/__tests__/download-study.test.ts
+      - name: Run Claude Desktop extension tests against fake-mychart
+        run: cd claude-desktop-extension && bun install && bun test
         env:
           FAKE_MYCHART_HOST: localhost:4000
       - name: Install npm-package deps
