@@ -109,6 +109,15 @@ grabs two **free OS-assigned ports** on each run and prints the UI URL — multi
 worktrees / Claude sessions can each run their own loop without colliding. Pin
 them by exporting `CLIENT_PORT` / `SERVER_PORT` before running.
 
+**Running many at once.** Ports won't collide, but each `dev:reload` is ~7
+processes, loads the full server bundle, and opens a browser tab — so a dozen of
+them is heavy. The Inspector is the expensive part; you rarely need its UI in
+*every* worktree. Prefer `bun run dev:proxy` (just `mcpmon` — no ports, no
+browser) in the worktrees that only need the server to hot-reload, and run the
+full `dev:reload` only where you're actively inspecting. If you do want several
+Inspectors, set `MCP_AUTO_OPEN_ENABLED=false` to skip the auto-opened tabs and
+use the URL each run prints.
+
 To auto-reload the **installed** extension inside Claude Desktop (instead of the
 Inspector), point its launch command at the proxy:
 
