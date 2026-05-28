@@ -77,11 +77,59 @@ claude-desktop-extension/
 
 ```bash
 bun run build      # produces dist/server.cjs
-bun run dev        # tsup watch mode
+bun run dev        # tsup watch mode — rebuilds dist/server.cjs on every save
 bun run pack       # build + run `mcpb pack` → openrecord.mcpb
 ```
 
-To test in Claude Desktop:
+### Hot-reload dev loop (recommended)
+
+Claude Desktop spawns `dist/server.cjs` once and does **not** pick up rebuilds on
+its own — you'd otherwise have to toggle the extension off/on after every change.
+[`mcpmon`](https://www.npmjs.com/package/mcpmon) is a transparent stdio proxy
+(think `nodemon` for MCP) that restarts the server when `dist/` changes while
+keeping the client connected, and fires `notifications/tools/list_changed` so the
+tool list refreshes automatically.
+
+```bash
+bun run dev:reload   # build once, then tsup --watch + MCP Inspector via mcpmon
+```
+
+This opens the [MCP Inspector](https://github.com/modelcontextprotocol/inspector)
+in a browser where you can list/call tools, see logs, and render the `ui://`
+setup widget interactively (the Inspector acts as the MCP Apps host). Edit a file
+in `src/` → tsup rebuilds `dist/server.cjs` → mcpmon restarts the server → the
+Inspector stays connected. This is a faster loop than round-tripping through
+Claude Desktop.
+
+**Ports / parallel worktrees.** Only the Inspector binds TCP ports — two of them:
+the browser UI (`CLIENT_PORT`, default 6274) and the proxy (`SERVER_PORT`, default
+6277). `tsup` and `mcpmon` don't bind ports (mcpmon is a stdio proxy), and each
+worktree's `node dist/server.cjs` is an independent stdio child. So `dev:reload`
+grabs two **free OS-assigned ports** on each run and prints the UI URL — multiple
+worktrees / Claude sessions can each run their own loop without colliding. Pin
+them by exporting `CLIENT_PORT` / `SERVER_PORT` before running.
+
+**Running many at once.** Ports won't collide, but each `dev:reload` is ~7
+processes, loads the full server bundle, and opens a browser tab — so a dozen of
+them is heavy. The Inspector is the expensive part; you rarely need its UI in
+*every* worktree. Prefer `bun run dev:proxy` (just `mcpmon` — no ports, no
+browser) in the worktrees that only need the server to hot-reload, and run the
+full `dev:reload` only where you're actively inspecting. If you do want several
+Inspectors, set `MCP_AUTO_OPEN_ENABLED=false` to skip the auto-opened tabs and
+use the URL each run prints.
+
+To auto-reload the **installed** extension inside Claude Desktop (instead of the
+Inspector), point its launch command at the proxy:
+
+```bash
+bun run dev:proxy    # mcpmon --watch dist --ext cjs -- node dist/server.cjs
+```
+
+Use this as the server command in a dev build of `manifest.json` (the shipped
+manifest launches `node dist/server.cjs` directly — don't ship `mcpmon`). Keep
+`bun run dev` running alongside it so `dist/` stays current.
+
+### Test in Claude Desktop (packaged)
 
 1. `bun run pack`
 2. Drag the resulting `openrecord.mcpb` into Claude Desktop → Settings → Extensions.
