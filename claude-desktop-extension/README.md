@@ -77,11 +77,40 @@ claude-desktop-extension/
 
 ```bash
 bun run build      # produces dist/server.cjs
-bun run dev        # tsup watch mode
+bun run dev        # tsup watch mode — rebuilds dist/server.cjs on every save
 bun run pack       # build + run `mcpb pack` → openrecord.mcpb
 ```
 
-To test in Claude Desktop:
+### Hot-reload dev loop (recommended)
+
+Claude Desktop spawns `dist/server.cjs` once and does **not** pick up rebuilds on
+its own — you'd otherwise have to toggle the extension off/on after every change.
+[`mcpmon`](https://www.npmjs.com/package/mcpmon) is a transparent stdio proxy
+(think `nodemon` for MCP) that restarts the server when `dist/` changes while
+keeping the client connected, and fires `notifications/tools/list_changed` so the
+tool list refreshes automatically.
+
+```bash
+bun run dev:reload   # build once, then tsup --watch + MCP Inspector via mcpmon
+```
+
+This opens the [MCP Inspector](https://github.com/modelcontextprotocol/inspector)
+in a browser where you can list/call tools and see logs. Edit a file in `src/` →
+tsup rebuilds `dist/server.cjs` → mcpmon restarts the server → the Inspector
+stays connected. This is a faster loop than round-tripping through Claude Desktop.
+
+To auto-reload the **installed** extension inside Claude Desktop (instead of the
+Inspector), point its launch command at the proxy:
+
+```bash
+bun run dev:proxy    # mcpmon --watch dist --ext cjs -- node dist/server.cjs
+```
+
+Use this as the server command in a dev build of `manifest.json` (the shipped
+manifest launches `node dist/server.cjs` directly — don't ship `mcpmon`). Keep
+`bun run dev` running alongside it so `dist/` stays current.
+
+### Test in Claude Desktop (packaged)
 
 1. `bun run pack`
 2. Drag the resulting `openrecord.mcpb` into Claude Desktop → Settings → Extensions.

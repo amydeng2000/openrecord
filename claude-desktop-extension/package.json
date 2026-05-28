@@ -7,6 +7,8 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
+    "dev:reload": "bun run build && concurrently -k -n tsup,mcp -c blue,green \"tsup --watch\" \"npx -y @modelcontextprotocol/inspector mcpmon --watch dist --ext cjs -- node dist/server.cjs\"",
+    "dev:proxy": "mcpmon --watch dist --ext cjs -- node dist/server.cjs",
     "pack": "bun run build && npx -y @anthropic-ai/mcpb pack . openrecord.mcpb",
     "smoke": "bun run build && node smoke.cjs"
   },
@@ -21,6 +23,8 @@
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
+    "concurrently": "^9.2.1",
+    "mcpmon": "^1.0.1",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3"
   }
