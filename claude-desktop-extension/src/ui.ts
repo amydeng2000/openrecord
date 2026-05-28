@@ -3,12 +3,16 @@ export const SETUP_UI_MIME_TYPE = 'text/html;profile=mcp-app';
 /**
  * Interactive Setup Widget for OpenRecord.
  *
- * This HTML is served via the MCP Apps ui:// protocol. It provides a
- * user-friendly interface for searching MyChart instances and entering
- * credentials, rather than doing it all in the chat text.
+ * Served via the MCP Apps ui:// protocol. Step-based flow:
+ *   1. Pick a health system from an autocomplete dropdown (results appear only
+ *      after the user types; they must choose an entry — free-text hostnames
+ *      are not accepted).
+ *   2. Enter MyChart credentials for the chosen system; submitting fires the
+ *      real login scrapers via setup_account.
+ *   3. Two-step verification — only reached when setup_account reports
+ *      need_2fa; the code is completed via complete_2fa.
  */
-
-export const SETUP_UI_HTML = `
+const SETUP_UI_TEMPLATE = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -34,6 +38,9 @@ export const SETUP_UI_HTML = `
         --hover: #2d2d2d;
       }
     }
+    /* The UA [hidden] rule (display:none) loses to component rules like
+       .field { display:flex }, so make the hidden attribute authoritative. */
+    [hidden] { display: none !important; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       background: var(--bg);
@@ -53,6 +60,11 @@ export const SETUP_UI_HTML = `
       font-size: 15px;
       margin: 0 0 2px 0;
       font-weight: 700;
+    }
+    .step-sub {
+      font-size: 12px;
+      opacity: 0.7;
+      margin: 0 0 4px 0;
     }
     .field {
       display: flex;
@@ -98,6 +110,16 @@ export const SETUP_UI_HTML = `
       opacity: 0.5;
       cursor: not-allowed;
     }
+    .link-btn {
+      background: none;
+      color: var(--accent);
+      padding: 0;
+      font-size: 12px;
+      font-weight: 600;
+      align-self: flex-start;
+      width: auto;
+    }
+    .link-btn:hover { text-decoration: underline; }
     .status {
       font-size: 12px;
       padding: 7px 10px;
@@ -144,7 +166,7 @@ export const SETUP_UI_HTML = `
       background: var(--bg);
       border: 1px solid var(--border);
       border-radius: 6px;
-      max-height: 220px;
+      max-height: 240px;
       overflow-y: auto;
       z-index: 10;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
@@ -191,18 +213,60 @@ export const SETUP_UI_HTML = `
       overflow: hidden;
       text-overflow: ellipsis;
     }
+    /* MyChart logos are wide banners (~640x230), so the slot is a banner-shaped
+       rectangle. A white backing keeps dark-text logos legible in dark mode.
+       The slot is fixed-size so names stay aligned whether or not a logo loads;
+       .row-logo-empty paints a neutral placeholder for entries with no logo. */
     .results img.row-logo {
-      width: 18px;
-      height: 18px;
+      width: 56px;
+      height: 26px;
       border-radius: 4px;
-      object-fit: cover;
+      object-fit: contain;
+      background: #ffffff;
+      padding: 1px 3px;
+      box-sizing: border-box;
       flex-shrink: 0;
     }
-    .selected-hint {
-      font-size: 11px;
-      opacity: 0.7;
+    .results img.row-logo-empty {
+      background: var(--hover);
+      padding: 0;
+      border: 1px solid var(--border);
+    }
+    /* Pages 2 & 3: the chosen system's banner sits prominently above the
+       inputs, with the hostname beneath it (centered column). */
+    .instance-header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 6px;
+      padding: 14px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--hover);
+    }
+    .instance-logo {
+      max-width: 230px;
+      width: auto;
+      height: 48px;
+      object-fit: contain;
+      background: #ffffff;
+      border-radius: 6px;
+      padding: 4px 10px;
+      box-sizing: border-box;
+    }
+    .instance-name {
+      font-weight: 700;
+      font-size: 15px;
+      max-width: 100%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .field-error {
+      color: var(--error);
+      font-size: 12px;
       margin: 2px 0 0 0;
-      word-break: break-all;
     }
     .success-card {
       display: none;
@@ -275,21 +339,31 @@ export const SETUP_UI_HTML = `
 </head>
 <body>
   <div class="container">
-    <h1>Connect to MyChart</h1>
+    <h1 id="title">Connect to MyChart</h1>
 
     <div id="status" class="status"></div>
 
-    <div id="setup-form">
+    <!-- ── Step 1: pick a health system ───────────────────────────────── -->
+    <div id="step-picker">
+      <p class="step-sub">Search for your hospital or clinic, then pick it from the list.</p>
       <div class="field combobox">
-        <label>Health System</label>
-        <input type="text" id="hostname" placeholder="Search hospital or clinic (e.g. 'Denver Health')" autocomplete="off">
-        <ul id="hostname-results" class="results" hidden></ul>
-        <p class="selected-hint" id="selected-hint" hidden></p>
+        <input type="text" id="search" placeholder="Search hospital or clinic (e.g. 'Denver Health')" autocomplete="off" spellcheck="false">
+        <ul id="results" class="results" hidden></ul>
+      </div>
+    </div>
+
+    <!-- ── Step 2: credentials for the chosen system ──────────────────── -->
+    <div id="step-creds" hidden>
+      <button id="back" class="link-btn" type="button">‹ Change health system</button>
+
+      <div class="instance-header">
+        <img id="instance-logo" class="instance-logo" alt="">
+        <div class="instance-name" id="instance-name"></div>
       </div>
 
       <div class="field">
         <label>Username</label>
-        <input type="text" id="username" placeholder="MyChart username">
+        <input type="text" id="username" placeholder="MyChart username" autocomplete="off">
       </div>
 
       <div class="field">
@@ -297,16 +371,35 @@ export const SETUP_UI_HTML = `
         <input type="password" id="password" placeholder="MyChart password">
       </div>
 
-      <div id="2fa-section" class="field" style="display: none;">
-        <label>Verification Code</label>
-        <input type="text" id="2fa-code" placeholder="6-digit code" maxlength="6">
-      </div>
-
       <div class="actions">
         <button id="submit">Connect Account</button>
+        <p class="field-error" id="creds-error" hidden></p>
       </div>
     </div>
 
+    <!-- ── Step 3: 2FA — only reached when the portal requires a code ──── -->
+    <div id="step-2fa" hidden>
+      <button id="back-2fa" class="link-btn" type="button">‹ Back</button>
+
+      <div class="instance-header">
+        <img id="instance-logo-2fa" class="instance-logo" alt="">
+        <div class="instance-name" id="instance-name-2fa"></div>
+      </div>
+
+      <p class="step-sub" id="twofa-hint">Enter the 6-digit verification code to finish signing in.</p>
+
+      <div class="field">
+        <label>Verification Code</label>
+        <input type="text" id="2fa-code" placeholder="6-digit code" maxlength="6" inputmode="numeric" autocomplete="one-time-code">
+      </div>
+
+      <div class="actions">
+        <button id="verify">Verify Code</button>
+        <p class="field-error" id="twofa-error" hidden></p>
+      </div>
+    </div>
+
+    <!-- ── Success ─────────────────────────────────────────────────────── -->
     <div id="success-card" class="success-card">
       <div class="check-circle">
         <svg viewBox="0 0 24 24"><polyline points="5 12.5 10 17.5 19 7.5"></polyline></svg>
@@ -318,85 +411,110 @@ export const SETUP_UI_HTML = `
   </div>
 
   <script>
-    const hostnameInput = document.getElementById('hostname');
-    const usernameInput = document.getElementById('username');
-    const passwordInput = document.getElementById('password');
-    const twoFaSection = document.getElementById('2fa-section');
-    const twoFaInput = document.getElementById('2fa-code');
-    const submitBtn = document.getElementById('submit');
-    const statusDiv = document.getElementById('status');
-    const setupForm = document.getElementById('setup-form');
-    const successCard = document.getElementById('success-card');
-    const successHost = document.getElementById('success-host');
-    const resultsList = document.getElementById('hostname-results');
-    const selectedHint = document.getElementById('selected-hint');
+    // Featured suggestions (e.g. the fake-mychart test sandbox), injected at build time.
+    var titleEl = document.getElementById('title');
+    var statusDiv = document.getElementById('status');
+    var stepPicker = document.getElementById('step-picker');
+    var stepCreds = document.getElementById('step-creds');
+    var stepTwoFa = document.getElementById('step-2fa');
+    var searchInput = document.getElementById('search');
+    var resultsList = document.getElementById('results');
+    var backBtn = document.getElementById('back');
+    var back2faBtn = document.getElementById('back-2fa');
+    var instanceLogo = document.getElementById('instance-logo');
+    var instanceName = document.getElementById('instance-name');
+    var instanceLogo2fa = document.getElementById('instance-logo-2fa');
+    var instanceName2fa = document.getElementById('instance-name-2fa');
+    var twoFaHint = document.getElementById('twofa-hint');
+    var usernameInput = document.getElementById('username');
+    var passwordInput = document.getElementById('password');
+    var twoFaInput = document.getElementById('2fa-code');
+    var submitBtn = document.getElementById('submit');
+    var verifyBtn = document.getElementById('verify');
+    var credsError = document.getElementById('creds-error');
+    var twoFaError = document.getElementById('twofa-error');
+    var successCard = document.getElementById('success-card');
+    var successHost = document.getElementById('success-host');
 
-    let pendingId = null;
-    let selectedHostname = null;
+    var pendingId = null;
+    var selectedInstance = null;
+    var currentRows = [];
+    var activeIndex = -1;
 
-    function showSuccess(account) {
-      hideStatus();
-      setupForm.style.display = 'none';
-      successHost.innerText = account ? 'Linked to ' + account : '';
-      successCard.classList.add('visible');
-      // Tell Claude to pick up the original task now that an account is connected.
-      // ui/message injects a user-role message into the conversation, which
-      // immediately triggers a model response — no need for the user to type.
-      const hostMsg = account
-        ? 'My MyChart account at ' + account + ' is now connected. Please continue with my original request.'
-        : 'My MyChart account is now connected. Please continue with my original request.';
-      rpc('ui/message', {
-        role: 'user',
-        content: [{ type: 'text', text: hostMsg }],
-      }).catch((err) => {
-        // Non-fatal — the model just won't auto-continue. The visual confirmation still appears.
-        // eslint-disable-next-line no-console
-        console.error('ui/message failed:', err && err.message ? err.message : err);
-      });
+    var STEP_TITLES = {
+      picker: 'Connect to MyChart',
+      creds: 'Sign in to MyChart',
+      twofa: 'Two-step verification',
+    };
+
+    function showStep(step) {
+      stepPicker.hidden = step !== 'picker';
+      stepCreds.hidden = step !== 'creds';
+      stepTwoFa.hidden = step !== 'twofa';
+      successCard.classList.remove('visible');
+      titleEl.innerText = STEP_TITLES[step] || STEP_TITLES.picker;
     }
 
-    function showStatus(msg, type = 'error') {
+    // Fill an instance header: the system's banner logo above its full name.
+    // No hostname. If the logo is missing or fails to load, just the name shows.
+    function fillHeader(logoImg, nameEl, inst) {
+      nameEl.innerText = (inst && (inst.name || inst.hostname)) || '';
+      if (inst && inst.logoUrl) {
+        logoImg.src = inst.logoUrl;
+        logoImg.style.display = '';
+        logoImg.onerror = function () { logoImg.style.display = 'none'; };
+      } else {
+        logoImg.style.display = 'none';
+        logoImg.removeAttribute('src');
+      }
+    }
+
+    // Inline error label shown directly beneath a step's action button.
+    function showError(el, msg) { el.innerText = msg; el.hidden = false; }
+    function clearError(el) { el.innerText = ''; el.hidden = true; }
+
+    function showStatus(msg, type) {
       statusDiv.innerText = msg;
-      statusDiv.className = 'status ' + type;
+      statusDiv.className = 'status ' + (type || 'error');
     }
-
     function hideStatus() {
       statusDiv.style.display = 'none';
+      statusDiv.className = 'status';
     }
 
-    // ── MCP Apps JSON-RPC bridge (wire protocol per @modelcontextprotocol/ext-apps) ──
-    const MCP_APP_PROTOCOL_VERSION = '2026-01-26';
-    let nextRpcId = 0;
-    const pendingRpc = new Map();
-    let handshakeDone = null;
+    // ── MCP Apps JSON-RPC bridge ────────────────────────────────────────────
+    var MCP_APP_PROTOCOL_VERSION = '2026-01-26';
+    var nextRpcId = 0;
+    var pendingRpc = new Map();
+    var handshakeDone = null;
 
-    window.addEventListener('message', (event) => {
+    window.addEventListener('message', function (event) {
       if (event.source !== window.parent) return;
-      const msg = event.data;
+      var msg = event.data;
       if (!msg || msg.jsonrpc !== '2.0') return;
       if (msg.id != null && pendingRpc.has(msg.id)) {
-        const { resolve, reject } = pendingRpc.get(msg.id);
+        var entry = pendingRpc.get(msg.id);
         pendingRpc.delete(msg.id);
-        if (msg.error) reject(new Error(msg.error.message || 'RPC error'));
-        else resolve(msg.result);
+        if (msg.error) entry.reject(new Error(msg.error.message || 'RPC error'));
+        else entry.resolve(msg.result);
       }
     });
 
     function rpc(method, params) {
-      const id = nextRpcId++;
-      return new Promise((resolve, reject) => {
-        pendingRpc.set(id, { resolve, reject });
-        window.parent.postMessage({ jsonrpc: '2.0', id, method, params }, '*');
+      var id = nextRpcId++;
+      return new Promise(function (resolve, reject) {
+        pendingRpc.set(id, { resolve: resolve, reject: reject });
+        window.parent.postMessage({ jsonrpc: '2.0', id: id, method: method, params: params }, '*');
       });
     }
 
     function notify(method, params) {
-      window.parent.postMessage({ jsonrpc: '2.0', method, params }, '*');
+      window.parent.postMessage({ jsonrpc: '2.0', method: method, params: params }, '*');
     }
 
-    async function ensureHandshake() {
+    function ensureHandshake() {
       if (!handshakeDone) {
-        handshakeDone = (async () => {
+        handshakeDone = (async function () {
           await rpc('ui/initialize', {
             appInfo: { name: 'openrecord-setup', version: '0.1.0' },
             appCapabilities: {},
@@ -410,9 +528,9 @@ export const SETUP_UI_HTML = `
 
     async function callTool(name, args) {
       await ensureHandshake();
-      const result = await rpc('tools/call', { name, arguments: args });
+      var result = await rpc('tools/call', { name: name, arguments: args });
       if (result && result.content && Array.isArray(result.content)) {
-        const textContent = result.content.find(c => c.type === 'text');
+        var textContent = result.content.find(function (c) { return c.type === 'text'; });
         if (textContent) {
           try { return JSON.parse(textContent.text); }
           catch (e) { return textContent.text; }
@@ -421,218 +539,345 @@ export const SETUP_UI_HTML = `
       return result;
     }
 
-    // ── Hostname autocomplete (search_mycharts) ────────────────────────────
-    let searchEpoch = 0;
-    let searchDebounce = 0;
+    // ── Step 1: health-system picker ────────────────────────────────────────
+    var searchEpoch = 0;
+    var searchDebounce = 0;
 
     function hideResults() {
       resultsList.hidden = true;
       resultsList.innerHTML = '';
+      currentRows = [];
+      activeIndex = -1;
     }
 
-    function renderResults(rows) {
+    function setActive(i) {
+      activeIndex = i;
+      var items = resultsList.children;
+      for (var idx = 0; idx < items.length; idx++) {
+        if (idx === i) {
+          items[idx].classList.add('active');
+          items[idx].scrollIntoView({ block: 'nearest' });
+        } else {
+          items[idx].classList.remove('active');
+        }
+      }
+    }
+
+    function renderRows(rows, emptyText) {
       resultsList.innerHTML = '';
-      if (rows.length === 0) {
-        const li = document.createElement('li');
+      currentRows = rows;
+      activeIndex = -1;
+      if (!rows || rows.length === 0) {
+        var li = document.createElement('li');
         li.className = 'empty';
-        li.innerText = 'No matches — or type the hostname directly.';
+        li.innerText = emptyText || 'No matching health systems.';
         resultsList.appendChild(li);
         resultsList.hidden = false;
         return;
       }
-      for (const r of rows) {
-        const li = document.createElement('li');
+      rows.forEach(function (r, i) {
+        var li = document.createElement('li');
+        li.setAttribute('data-index', String(i));
 
+        var img = document.createElement('img');
+        img.className = 'row-logo';
         if (r.logoUrl) {
-          const img = document.createElement('img');
-          img.className = 'row-logo';
           img.src = r.logoUrl;
           img.alt = '';
-          img.onerror = () => { img.style.display = 'none'; };
-          li.appendChild(img);
+          img.onerror = function () { img.classList.add('row-logo-empty'); img.removeAttribute('src'); };
+        } else {
+          img.classList.add('row-logo-empty');
         }
+        li.appendChild(img);
 
-        const text = document.createElement('div');
+        var text = document.createElement('div');
         text.className = 'row-text';
-        const name = document.createElement('span');
+        var name = document.createElement('span');
         name.className = 'row-name';
         name.innerText = r.name || r.hostname;
-        const host = document.createElement('span');
+        var host = document.createElement('span');
         host.className = 'row-host';
         host.innerText = r.hostname;
         text.appendChild(name);
         text.appendChild(host);
         li.appendChild(text);
 
-        // mousedown beats input blur — selection lands before the dropdown is hidden.
-        li.addEventListener('mousedown', (e) => {
-          e.preventDefault();
-          selectInstance(r);
-        });
+        // mousedown beats the input's blur so selection lands before hide.
+        li.addEventListener('mousedown', function (e) { e.preventDefault(); selectInstance(r); });
+        li.addEventListener('mousemove', function () { setActive(i); });
         resultsList.appendChild(li);
-      }
+      });
       resultsList.hidden = false;
     }
 
     function showLoading() {
       resultsList.innerHTML = '';
-      const li = document.createElement('li');
+      currentRows = [];
+      activeIndex = -1;
+      var li = document.createElement('li');
       li.className = 'loading';
       li.innerText = 'Searching…';
       resultsList.appendChild(li);
       resultsList.hidden = false;
     }
 
-    function selectInstance(r) {
-      selectedHostname = r.hostname;
-      hostnameInput.value = r.name || r.hostname;
-      selectedHint.innerText = 'Connecting to ' + r.hostname;
-      selectedHint.hidden = false;
-      hideResults();
-    }
-
-    function clearSelection() {
-      if (selectedHostname === null) return;
-      selectedHostname = null;
-      selectedHint.hidden = true;
-      selectedHint.innerText = '';
-    }
-
     async function runSearch(query) {
-      const epoch = ++searchEpoch;
+      var epoch = ++searchEpoch;
       showLoading();
-      let res;
+      var res;
       try {
-        res = await callTool('search_mycharts', { query, limit: 8 });
+        res = await callTool('search_mycharts', { query: query, limit: 8 });
       } catch (err) {
         if (epoch !== searchEpoch) return;
         hideResults();
         return;
       }
       if (epoch !== searchEpoch) return; // a newer query is in flight; drop this response
-      const matches = (res && Array.isArray(res.matches)) ? res.matches : [];
-      renderResults(matches);
+      var matches = (res && Array.isArray(res.matches)) ? res.matches : [];
+      renderRows(matches);
     }
 
-    hostnameInput.addEventListener('input', () => {
-      clearSelection();
-      const q = hostnameInput.value.trim();
+    searchInput.addEventListener('input', function () {
+      var q = searchInput.value.trim();
       if (searchDebounce) clearTimeout(searchDebounce);
+      // Nothing is shown until the user actually types a query — no default
+      // suggestions on focus/empty.
       if (!q) {
         searchEpoch++; // invalidate any in-flight response
         hideResults();
         return;
       }
-      searchDebounce = setTimeout(() => runSearch(q), 200);
+      searchDebounce = setTimeout(function () { runSearch(q); }, 180);
     });
 
-    hostnameInput.addEventListener('focus', () => {
-      // Re-open the dropdown if the user re-focuses with a non-empty query and no selection.
-      if (!selectedHostname && hostnameInput.value.trim() && resultsList.children.length > 0) {
-        resultsList.hidden = false;
+    searchInput.addEventListener('focus', function () {
+      // Re-open existing results if the user refocuses a non-empty query;
+      // an empty box stays closed.
+      if (searchInput.value.trim() && currentRows.length) resultsList.hidden = false;
+    });
+
+    searchInput.addEventListener('keydown', function (e) {
+      if (resultsList.hidden) return;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (currentRows.length) setActive((activeIndex + 1) % currentRows.length);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (currentRows.length) setActive((activeIndex - 1 + currentRows.length) % currentRows.length);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        var idx = activeIndex >= 0 ? activeIndex : 0;
+        if (currentRows[idx]) selectInstance(currentRows[idx]);
+      } else if (e.key === 'Escape') {
+        hideResults();
       }
     });
 
-    document.addEventListener('mousedown', (e) => {
-      if (!hostnameInput.parentElement.contains(e.target)) hideResults();
+    document.addEventListener('mousedown', function (e) {
+      if (!searchInput.parentElement.contains(e.target)) hideResults();
     });
 
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') hideResults();
-    });
+    // ── Step transitions ────────────────────────────────────────────────────
+    function selectInstance(r) {
+      selectedInstance = r;
+      hideResults();
 
-    // Kick off the handshake immediately so the user's first click doesn't wait on it.
-    ensureHandshake().then(() => {
-      // Tell the host how tall we actually are so the iframe stops scrolling.
-      let lastH = 0;
-      let pending = 0;
-      const reportSize = () => {
-        const h = document.documentElement.scrollHeight;
+      fillHeader(instanceLogo, instanceName, r);
+
+      // Reset credential state for a clean step 2.
+      pendingId = null;
+      usernameInput.value = '';
+      passwordInput.value = '';
+      twoFaInput.value = '';
+      submitBtn.disabled = false;
+      submitBtn.innerText = 'Connect Account';
+      clearError(credsError);
+      hideStatus();
+
+      showStep('creds');
+      usernameInput.focus();
+    }
+
+    function goToPicker() {
+      selectedInstance = null;
+      pendingId = null;
+      hideStatus();
+      showStep('picker');
+      searchInput.focus();
+    }
+
+    // Move to the dedicated 2FA step once setup_account reports need_2fa.
+    function showTwoFa(delivery) {
+      fillHeader(instanceLogo2fa, instanceName2fa, selectedInstance || {});
+      twoFaHint.innerText = delivery
+        ? 'Enter the 6-digit code sent to ' + delivery + ' to finish signing in.'
+        : 'Enter the 6-digit verification code to finish signing in.';
+      twoFaInput.value = '';
+      verifyBtn.disabled = false;
+      verifyBtn.innerText = 'Verify Code';
+      clearError(twoFaError);
+      showStep('twofa');
+      twoFaInput.focus();
+    }
+
+    backBtn.onclick = goToPicker;
+
+    // Going back from 2FA returns to credentials; the pending login is dropped,
+    // so re-submitting starts a fresh login attempt.
+    back2faBtn.onclick = function () {
+      pendingId = null;
+      hideStatus();
+      clearError(credsError);
+      submitBtn.disabled = false;
+      submitBtn.innerText = 'Connect Account';
+      showStep('creds');
+      passwordInput.focus();
+    };
+
+    function showSuccess(account) {
+      hideStatus();
+      stepPicker.hidden = true;
+      stepCreds.hidden = true;
+      stepTwoFa.hidden = true;
+      successHost.innerText = account ? 'Linked to ' + account : '';
+      successCard.classList.add('visible');
+      // ui/message injects a user-role message so Claude resumes the original
+      // task immediately — the user doesn't have to type anything.
+      var hostMsg = account
+        ? 'My MyChart account at ' + account + ' is now connected. Please continue with my original request.'
+        : 'My MyChart account is now connected. Please continue with my original request.';
+      rpc('ui/message', {
+        role: 'user',
+        content: [{ type: 'text', text: hostMsg }],
+      }).catch(function (err) {
+        // Non-fatal — the visual confirmation still appears.
+        // eslint-disable-next-line no-console
+        console.error('ui/message failed:', err && err.message ? err.message : err);
+      });
+    }
+
+    // ── Step 2: submit credentials → run the login scrapers ─────────────────
+    submitBtn.onclick = async function () {
+      if (!selectedInstance) { goToPicker(); return; }
+      var hostname = selectedInstance.hostname;
+      var username = usernameInput.value;
+      var password = passwordInput.value;
+
+      var missingUser = !username;
+      var missingPass = !password;
+      if (missingUser || missingPass) {
+        showError(
+          credsError,
+          missingUser && missingPass ? 'Enter your username and password.'
+            : missingUser ? 'Enter your username.'
+            : 'Enter your password.',
+        );
+        (missingUser ? usernameInput : passwordInput).focus();
+        return;
+      }
+
+      clearError(credsError);
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="loader"></span> Connecting...';
+
+      try {
+        var result = await callTool('setup_account', { hostname: hostname, username: username, password: password });
+
+        if (result.state === 'need_2fa') {
+          // Only now do we know 2FA is required → advance to the 2FA step.
+          pendingId = result.pending_id;
+          submitBtn.disabled = false;
+          submitBtn.innerText = 'Connect Account';
+          showTwoFa(result.delivery || result.target || null);
+        } else if (result.state === 'logged_in') {
+          showSuccess(result.account || hostname);
+        } else if (result.state === 'invalid_login') {
+          showError(credsError, 'Invalid username or password. Please check your credentials.');
+          submitBtn.disabled = false;
+          submitBtn.innerText = 'Connect Account';
+        } else {
+          showError(credsError, result.message || 'Login failed. Please try again.');
+          submitBtn.disabled = false;
+          submitBtn.innerText = 'Connect Account';
+        }
+      } catch (e) {
+        showError(credsError, 'Error: ' + (e && e.message ? e.message : e));
+        submitBtn.disabled = false;
+        submitBtn.innerText = 'Connect Account';
+      }
+    };
+
+    // ── Step 3: submit the 2FA code → finish the login flow ─────────────────
+    verifyBtn.onclick = async function () {
+      if (!pendingId) { back2faBtn.onclick(); return; }
+      var code = (twoFaInput.value || '').trim();
+      if (code.length < 6) {
+        showError(twoFaError, 'Enter the 6-digit verification code.');
+        twoFaInput.focus();
+        return;
+      }
+
+      clearError(twoFaError);
+      verifyBtn.disabled = true;
+      verifyBtn.innerHTML = '<span class="loader"></span> Verifying...';
+
+      try {
+        var result = await callTool('complete_2fa', { pending_id: pendingId, code: code });
+        if (result.state === 'logged_in') {
+          showSuccess(result.account || (selectedInstance && selectedInstance.hostname));
+        } else if (result.state === 'invalid_2fa') {
+          showError(twoFaError, 'Invalid verification code. Please try again.');
+          pendingId = result.pending_id; // refreshed pending id
+          verifyBtn.disabled = false;
+          verifyBtn.innerText = 'Verify Code';
+          twoFaInput.focus();
+        } else {
+          showError(twoFaError, result.message || ('Unexpected state: ' + result.state));
+          verifyBtn.disabled = false;
+          verifyBtn.innerText = 'Verify Code';
+        }
+      } catch (e) {
+        showError(twoFaError, 'Error: ' + (e && e.message ? e.message : e));
+        verifyBtn.disabled = false;
+        verifyBtn.innerText = 'Verify Code';
+      }
+    };
+
+    // Clear the inline error as soon as the user starts correcting the input.
+    usernameInput.addEventListener('input', function () { clearError(credsError); });
+    passwordInput.addEventListener('input', function () { clearError(credsError); });
+    twoFaInput.addEventListener('input', function () { clearError(twoFaError); });
+
+    // Submit on Enter from the relevant fields.
+    passwordInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); submitBtn.click(); } });
+    twoFaInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); verifyBtn.click(); } });
+
+    // Kick off the handshake immediately so the first interaction doesn't wait on it.
+    ensureHandshake().then(function () {
+      // Tell the host our real height so the iframe stops scrolling.
+      var lastH = 0;
+      var pending = 0;
+      var reportSize = function () {
+        var h = document.documentElement.scrollHeight;
         if (h === lastH) return;
         lastH = h;
         notify('ui/notifications/size-changed', { height: h });
       };
-      const schedule = () => {
+      var schedule = function () {
         if (pending) return;
-        pending = requestAnimationFrame(() => { pending = 0; reportSize(); });
+        pending = requestAnimationFrame(function () { pending = 0; reportSize(); });
       };
       schedule();
       new ResizeObserver(schedule).observe(document.documentElement);
-    }).catch((err) => {
+    }).catch(function (err) {
       showStatus('Could not connect to host: ' + (err && err.message ? err.message : err));
     });
-
-    submitBtn.onclick = async () => {
-      const hostname = (selectedHostname || hostnameInput.value).trim();
-      const username = usernameInput.value;
-      const password = passwordInput.value;
-      const code = twoFaInput.value;
-
-      if (!hostname) {
-        showStatus('Please enter your MyChart hostname or pick one from the list.');
-        return;
-      }
-      if (!username || !password) {
-        showStatus('Please enter both username and password.');
-        return;
-      }
-
-      hideStatus();
-      submitBtn.disabled = true;
-      const originalText = submitBtn.innerText;
-      submitBtn.innerHTML = '<span class="loader"></span> Connecting...';
-
-      try {
-        if (pendingId) {
-          // Complete 2FA
-          if (!code || code.length < 6) {
-            showStatus('Please enter the 6-digit verification code.');
-            submitBtn.disabled = false;
-            submitBtn.innerText = originalText;
-            return;
-          }
-          const result = await callTool('complete_2fa', { pending_id: pendingId, code });
-          if (result.state === 'logged_in') {
-            showSuccess(result.account);
-          } else if (result.state === 'invalid_2fa') {
-            showStatus('Invalid verification code. Please try again.');
-            pendingId = result.pending_id; // Update if refreshed
-            submitBtn.disabled = false;
-            submitBtn.innerText = 'Verify Code';
-          } else {
-            showStatus('Unexpected state: ' + result.state);
-            submitBtn.disabled = false;
-            submitBtn.innerText = 'Verify Code';
-          }
-        } else {
-          // Initial Login
-          const result = await callTool('setup_account', { hostname, username, password });
-          
-          if (result.state === 'need_2fa') {
-            pendingId = result.pending_id;
-            twoFaSection.style.display = 'flex';
-            showStatus('Verification code sent to your registered device.', 'success');
-            submitBtn.disabled = false;
-            submitBtn.innerText = 'Verify Code';
-          } else if (result.state === 'logged_in') {
-            showSuccess(result.account || hostname);
-          } else if (result.state === 'invalid_login') {
-            showStatus('Invalid username or password. Please check your credentials.');
-            submitBtn.disabled = false;
-            submitBtn.innerText = 'Connect Account';
-          } else {
-            showStatus(result.message || 'Login failed. Please try again.');
-            submitBtn.disabled = false;
-            submitBtn.innerText = 'Connect Account';
-          }
-        }
-      } catch (e) {
-        showStatus('Error: ' + e.message);
-        submitBtn.disabled = false;
-        submitBtn.innerText = originalText;
-      }
-    };
   </script>
 </body>
 </html>
 `;
+
+/** The setup widget HTML, served as the ui://openrecord/setup resource. */
+export function buildSetupUiHtml(): string {
+  return SETUP_UI_TEMPLATE;
+}

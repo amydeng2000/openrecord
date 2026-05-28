@@ -21,8 +21,36 @@ After installing, open a new Claude chat and say:
 
 > Set up my MyChart.
 
-Claude walks through a setup sequence using ordinary tool calls (works in
-Claude Desktop, Claude.ai web, and any other MCP client):
+### Interactive widget (recommended)
+
+In Claude Desktop, Claude shows an inline **step-based setup widget**
+(`get_setup_widget`):
+
+1. **Pick a health system** — an autocomplete dropdown over the full MyChart
+   directory. Results appear only once you type (no default list); each shows
+   the system's banner logo. You must choose an entry from the list (free-text
+   hostnames aren't accepted). Search **test**, **springfield**, or
+   **fake-mychart** to find the **Springfield General Hospital (test)** entry,
+   which points at the `fake-mychart.fanpierlabs.com` sandbox (Homer Simpson
+   fake data, no real credentials needed — sign in with `homer` / `donuts123`).
+2. **Sign in** — the chosen system's logo sits above username + password
+   fields. Submitting runs the real login scrapers via `setup_account`.
+   Validation/login errors show inline beneath the button.
+3. **Two-step verification** — shown only if `setup_account` reports the portal
+   requires a code; entering it calls `complete_2fa`.
+
+> **Logos.** MyChart's only per-instance brand asset is the wide banner logo
+> (`ichart2.epic.com`, ~640×230), so the widget uses it everywhere — a
+> banner-shaped slot in the dropdown and a banner above the inputs on the
+> sign-in / 2FA steps. Square favicons aren't used: ~half of instances are
+> multi-tenant (many orgs share one host, e.g. 200+ on `mychart.ochin.org`) and
+> favicons are per-host, so they can't distinguish those orgs; most are also
+> just the generic Epic icon.
+
+### Tool-call fallback
+
+Without the widget (Claude.ai web, other MCP clients), Claude walks through the
+same setup sequence using ordinary tool calls:
 
 1. **`search_mycharts`** — Claude asks you for your health system name (e.g.
    "uchealth", "mass general") and looks up the hostname.
