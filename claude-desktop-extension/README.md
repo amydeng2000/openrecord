@@ -21,8 +21,27 @@ After installing, open a new Claude chat and say:
 
 > Set up my MyChart.
 
-Claude walks through a setup sequence using ordinary tool calls (works in
-Claude Desktop, Claude.ai web, and any other MCP client):
+### Interactive widget (recommended)
+
+In Claude Desktop, Claude shows an inline **two-step setup widget**
+(`get_setup_widget`):
+
+1. **Pick a health system** — an autocomplete dropdown over the full MyChart
+   directory. Each result shows the system's logo on the left. You must choose
+   an entry from the list (free-text hostnames aren't accepted). The
+   **Springfield General Hospital (test)** entry points at the
+   `fake-mychart.fanpierlabs.com` sandbox (Homer Simpson fake data, no real
+   credentials needed — sign in with `homer` / `donuts123`) and appears as a
+   default suggestion.
+2. **Sign in** — the chosen system's logo and name are shown, followed by
+   username + password fields. Submitting runs the real login scrapers via
+   `setup_account`; if the portal requires it, a 2FA code field appears and is
+   completed via `complete_2fa`.
+
+### Tool-call fallback
+
+Without the widget (Claude.ai web, other MCP clients), Claude walks through the
+same setup sequence using ordinary tool calls:
 
 1. **`search_mycharts`** — Claude asks you for your health system name (e.g.
    "uchealth", "mass general") and looks up the hostname.

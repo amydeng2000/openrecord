@@ -19,19 +19,48 @@ export interface Instance {
   hostname: string;
 }
 
-const all: Instance[] = (rawInstances as Array<{ name: string; url: string; logoS3Url?: string; logoUrl?: string }>).map(raw => {
+/**
+ * Test/demo entry pointing at the deployed fake-mychart sandbox. Lets users
+ * (and developers) exercise the full connect flow with Homer Simpson fake data
+ * without needing real Epic credentials. The "(test)" suffix makes it obvious
+ * in the picker that this is not a real health system. Credentials:
+ * `homer` / `donuts123`.
+ */
+const FAKE_MYCHART_TEST: Instance = {
+  name: 'Springfield General Hospital (test)',
+  url: 'https://fake-mychart.fanpierlabs.com/MyChart/',
+  logoUrl: '',
+  hostname: 'fake-mychart.fanpierlabs.com',
+};
+
+const realInstances: Instance[] = (rawInstances as Array<{ name: string; url: string; logoS3Url?: string; logoUrl?: string }>).map(raw => {
   let hostname = '';
   try { hostname = new URL(raw.url).hostname.toLowerCase(); } catch { /* keep empty */ }
   return {
     name: raw.name,
     url: raw.url,
-    logoUrl: raw.logoS3Url || raw.logoUrl || '',
+    // Prefer the public Epic-hosted logo (ichart2.epic.com). The S3 mirror
+    // (logoS3Url) lives in a PRIVATE bucket — it 403s without AWS creds, which
+    // the MCPB has none of (it runs on the user's machine), so it can't be
+    // used directly in the widget.
+    logoUrl: raw.logoUrl || raw.logoS3Url || '',
     hostname,
   };
 }).filter(i => i.hostname);
 
+// The test entry is listed first so it surfaces as a default suggestion.
+const all: Instance[] = [FAKE_MYCHART_TEST, ...realInstances];
+
 export function allInstances(): Instance[] {
   return all;
+}
+
+/**
+ * Instances to surface as default suggestions before the user types anything
+ * (currently just the fake-mychart test sandbox).
+ */
+export function featuredInstances(): Instance[] {
+  return [FAKE_MYCHART_TEST];
 }
 
 /**

@@ -27,7 +27,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { registerAllTools } from './tools';
 import { clearAllSessions } from './session-manager';
-import { SETUP_UI_HTML, SETUP_UI_MIME_TYPE } from './ui';
+import { buildSetupUiHtml, SETUP_UI_MIME_TYPE } from './ui';
+import { featuredInstances } from './instances';
 
 async function main(): Promise<void> {
   const server = new McpServer(
@@ -71,7 +72,12 @@ async function main(): Promise<void> {
 
   // ── Resources ─────────────────────────────────────────────────────────────
 
-  // Serve the interactive setup widget HTML
+  // Serve the interactive setup widget HTML. Featured instances (the
+  // fake-mychart test sandbox) are injected once at startup as default
+  // picker suggestions.
+  const setupHtml = buildSetupUiHtml(
+    featuredInstances().map(i => ({ hostname: i.hostname, name: i.name, logoUrl: i.logoUrl })),
+  );
   server.resource(
     'setup-ui',
     'ui://openrecord/setup',
@@ -80,7 +86,7 @@ async function main(): Promise<void> {
       contents: [{
         uri: 'ui://openrecord/setup',
         mimeType: SETUP_UI_MIME_TYPE,
-        text: SETUP_UI_HTML,
+        text: setupHtml,
       }],
     })
   );
