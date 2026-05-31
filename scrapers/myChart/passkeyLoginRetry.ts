@@ -1,5 +1,5 @@
-import type { PasskeyCredential } from '../../scrapers/myChart/softwareAuthenticator';
-import type { LoginResult } from '../../scrapers/myChart/login';
+import type { PasskeyCredential } from './softwareAuthenticator';
+import type { LoginResult } from './login';
 
 // How many times we'll bump the WebAuthn signature counter and retry a passkey
 // login before giving up. The server's counter only ever moves a little ahead
@@ -15,8 +15,8 @@ export const MAX_SIGN_COUNT_BUMPS = 10;
  * login advanced the server but the bumped value was never persisted (e.g. the
  * login was treated as failed, or the process exited first), or the same
  * passkey was used from another device. When that happens the first assertion
- * is rejected because its counter is too low, and the previous CLI behaviour
- * was to give up immediately.
+ * is rejected because its counter is too low, and the previous behaviour was to
+ * give up immediately.
  *
  * Here we treat an `invalid_login` as a possible counter mismatch: bump the
  * counter and retry, up to `maxBumps` times. `attempt` is expected to run the
@@ -27,6 +27,10 @@ export const MAX_SIGN_COUNT_BUMPS = 10;
  *
  * `credential` is mutated in place (its `signCount` is advanced); callers
  * should persist it after a successful return.
+ *
+ * Shared by the CLI (`npm-package/cli/cli.ts`) and the Expo app
+ * (`expo-app/src/lib/scrapers/session-manager.ts`) — both auto-login with a
+ * locally-stored passkey credential and hit the same desync.
  */
 export async function passkeyLoginWithCounterRetry(
   attempt: (credential: PasskeyCredential) => Promise<LoginResult>,

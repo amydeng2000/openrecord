@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'bun:test';
-import { passkeyLoginWithCounterRetry, MAX_SIGN_COUNT_BUMPS } from '../passkeyLogin';
-import type { PasskeyCredential } from '../../../scrapers/myChart/softwareAuthenticator';
-import type { LoginResult } from '../../../scrapers/myChart/login';
+import { passkeyLoginWithCounterRetry, MAX_SIGN_COUNT_BUMPS } from '../passkeyLoginRetry';
+import type { PasskeyCredential } from '../softwareAuthenticator';
+import type { LoginResult } from '../login';
 
 function makeCredential(signCount: number): PasskeyCredential {
   return {

@@ -50,7 +50,7 @@ import { saveTotpSecret, loadTotpSecret } from './totpStore';
 import { myChartPasskeyLogin } from '../../scrapers/myChart/login';
 import { setupPasskey, listPasskeys, deletePasskey } from '../../scrapers/myChart/setupPasskey';
 import { savePasskeyCredential, loadPasskeyCredential } from './passkeyStore';
-import { passkeyLoginWithCounterRetry } from './passkeyLogin';
+import { passkeyLoginWithCounterRetry } from '../../scrapers/myChart/passkeyLoginRetry';
 import type { PasskeyCredential } from '../../scrapers/myChart/softwareAuthenticator';
 import { sendTelemetryEvent } from '../../shared/telemetry';
 import { checkForUpdate } from '../../shared/updateCheck';

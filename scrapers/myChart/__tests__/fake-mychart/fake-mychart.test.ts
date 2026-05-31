@@ -12,7 +12,7 @@ import { describe, it, expect, beforeAll } from 'bun:test'
 import { MyChartRequest } from '../../myChartRequest'
 import { myChartUserPassLogin, myChartPasskeyLogin } from '../../login'
 import { setupPasskey } from '../../setupPasskey'
-import { passkeyLoginWithCounterRetry } from '../../../../npm-package/cli/passkeyLogin'
+import { passkeyLoginWithCounterRetry } from '../../passkeyLoginRetry'
 
 // Scrapers
 import { getMyChartProfile, getEmail } from '../../profile'
@@ -298,8 +298,9 @@ describe('fake-mychart integration', () => {
   // The fake enforces the WebAuthn signature counter the way real MyChart
   // does: each passkey assertion must present a counter strictly greater than
   // the last accepted one. This proves (a) the enforcement, and (b) that the
-  // CLI's passkeyLoginWithCounterRetry recovers when the stored counter has
-  // fallen behind the server (the bug behind the CLI passkey-login failures).
+  // shared passkeyLoginWithCounterRetry recovers when the stored counter has
+  // fallen behind the server (the bug behind the passkey-login failures shared
+  // by the CLI and the Expo app).
   it('enforces the passkey signature counter and recovers via retry', async () => {
     // Register a fresh passkey using the password-authenticated session.
     const credential = await setupPasskey(session)
