@@ -293,6 +293,31 @@ describe('fake-mychart integration', () => {
     expect(result).toBeDefined()
   }, 10_000)
 
+  // Regression test for issue #189: pastVisits must follow MyChart's
+  // LoadPast pagination (HasMoreData + SerializedIndex) rather than stopping
+  // after the first page. The fake serves 12 visits at a page size of 5, so a
+  // correct implementation walks 3 pages and returns all of them.
+  it('pastVisits paginates past the first page and returns the full history', async () => {
+    const twoYearsAgo = new Date()
+    twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2)
+    const result = await pastVisits(session, twoYearsAgo)
+
+    if ('error' in result) throw new Error(`pastVisits errored: ${result.error}`)
+    expect(result.List).toBeDefined()
+
+    const allVisits = Object.values(result.List).flatMap(org => org.List)
+    // 12 fixture visits — more than a single 5-visit page would yield.
+    expect(allVisits.length).toBe(12)
+
+    // The oldest visit (CSN-HOMER-013, only reachable on page 3) confirms we
+    // didn't stop early at the first page of 5.
+    const csns = allVisits.map(v => v.Csn)
+    expect(csns).toContain('CSN-HOMER-013')
+
+    // No org should still be flagged as having more data once we've drained it.
+    expect(Object.values(result.List).every(org => !org.HasMoreData)).toBe(true)
+  }, 10_000)
+
   it('getVisitNotes returns the 3 ED notes for the Donut Incident visit', async () => {
     const result = await getVisitNotes(session, 'CSN-HOMER-003')
     expect(result.csn).toBe('CSN-HOMER-003')

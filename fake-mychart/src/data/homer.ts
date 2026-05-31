@@ -540,6 +540,53 @@ export const upcomingVisits = {
   IsScrollToEnabled: false,
 };
 
+// Lightweight past-visit factory for filler history. Real MyChart returns far
+// more than one page of past visits, so we need enough entries here to force
+// the scraper's LoadPast pagination loop to make multiple requests (see the
+// `serializedIndex` continuation handling in the MyChart route + issue #189).
+function fakePastVisit(
+  csn: string,
+  primaryDate: string,
+  visitType: string,
+  provider: string,
+): Record<string, unknown> {
+  const ms = Date.parse(primaryDate);
+  return {
+    PrimaryDate: primaryDate,
+    Instant: `/Date(${ms})/`,
+    Date: new Date(ms).toDateString(),
+    Csn: csn,
+    Id: `VISIT-${csn}`,
+    VisitType: visitType,
+    VisitTypeName: visitType,
+    Providers: [{ Name: provider, ID: `PROV-${csn}` }],
+    PrimaryProviderName: provider,
+    Location: 'Springfield General Hospital',
+    LocationAddress: '123 Main Street, Springfield, NT 49007',
+    Organization: {
+      OrganizationId: 'ORG-SPRINGFIELD',
+      OrganizationIdentifier: null,
+      RelatedOrganizations: null,
+      HasChildOrgs: false,
+    },
+  };
+}
+
+// Filler past visits (newest→oldest), all within ~2 years so they fall inside
+// the default scrape window. Combined with the 3 detailed visits below this
+// gives 12 total → 3 pages at the route's page size of 5.
+const EXTRA_PAST_VISITS = [
+  fakePastVisit('CSN-HOMER-005', '06/15/2025 09:00:00 AM', 'Office Visit', 'Julius Hibbert, MD'),
+  fakePastVisit('CSN-HOMER-006', '04/02/2025 11:30:00 AM', 'Telephone', 'Julius Hibbert, MD'),
+  fakePastVisit('CSN-HOMER-007', '02/18/2025 02:00:00 PM', 'Office Visit', 'Nick Riviera, MD'),
+  fakePastVisit('CSN-HOMER-008', '12/05/2024 10:15:00 AM', 'Lab Work', 'Julius Hibbert, MD'),
+  fakePastVisit('CSN-HOMER-009', '11/12/2024 03:45:00 PM', 'Office Visit', 'Julius Hibbert, MD'),
+  fakePastVisit('CSN-HOMER-010', '10/01/2024 08:30:00 AM', 'Procedure', 'Nick Riviera, MD'),
+  fakePastVisit('CSN-HOMER-011', '09/15/2024 01:00:00 PM', 'Office Visit', 'Julius Hibbert, MD'),
+  fakePastVisit('CSN-HOMER-012', '08/20/2024 09:45:00 AM', 'Telephone', 'Julius Hibbert, MD'),
+  fakePastVisit('CSN-HOMER-013', '07/10/2024 12:00:00 PM', 'Office Visit', 'Julius Hibbert, MD'),
+];
+
 export const pastVisits = {
   LaterVisitsList: [],
   EarlierVisitsList: [],
@@ -700,6 +747,7 @@ export const pastVisits = {
       ScheduleNewLink: null,
       VisitProviderAppointment: null,
     },
+    ...EXTRA_PAST_VISITS,
   ],
   ApptTypes: null,
   IsScrollToEnabled: false,
