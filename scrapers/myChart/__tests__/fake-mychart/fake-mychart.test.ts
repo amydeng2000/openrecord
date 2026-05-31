@@ -10,7 +10,9 @@
 
 import { describe, it, expect, beforeAll } from 'bun:test'
 import { MyChartRequest } from '../../myChartRequest'
-import { myChartUserPassLogin } from '../../login'
+import { myChartUserPassLogin, myChartPasskeyLogin } from '../../login'
+import { setupPasskey } from '../../setupPasskey'
+import { passkeyLoginWithCounterRetry } from '../../passkeyLoginRetry'
 
 // Scrapers
 import { getMyChartProfile, getEmail } from '../../profile'
@@ -292,6 +294,39 @@ describe('fake-mychart integration', () => {
     const result = await pastVisits(session, twoYearsAgo)
     expect(result).toBeDefined()
   }, 10_000)
+
+  // The fake enforces the WebAuthn signature counter the way real MyChart
+  // does: each passkey assertion must present a counter strictly greater than
+  // the last accepted one. This proves (a) the enforcement, and (b) that the
+  // shared passkeyLoginWithCounterRetry recovers when the stored counter has
+  // fallen behind the server (the bug behind the passkey-login failures shared
+  // by the CLI and the Expo app).
+  it('enforces the passkey signature counter and recovers via retry', async () => {
+    // Register a fresh passkey using the password-authenticated session.
+    const credential = await setupPasskey(session)
+    expect(credential).not.toBeNull()
+    const cred = credential!
+    expect(cred.signCount).toBe(0)
+
+    // First login advances the server's counter to 1 (assertion sends 0+1).
+    const first = await myChartPasskeyLogin({ hostname: HOST, credential: { ...cred }, protocol: 'http' })
+    expect(first.state).toBe('logged_in')
+
+    // A stale credential (counter reset to 0) replays counter 1, which the
+    // server has already seen — must be rejected.
+    const replay = await myChartPasskeyLogin({ hostname: HOST, credential: { ...cred, signCount: 0 }, protocol: 'http' })
+    expect(replay.state).toBe('invalid_login')
+
+    // The retry helper bumps the counter (sends 2 > 1) and recovers, leaving
+    // the credential at the accepted value for the caller to persist.
+    const retryCred = { ...cred, signCount: 0 }
+    const recovered = await passkeyLoginWithCounterRetry(
+      (c) => myChartPasskeyLogin({ hostname: HOST, credential: c, protocol: 'http' }),
+      retryCred,
+    )
+    expect(recovered.state).toBe('logged_in')
+    expect(retryCred.signCount).toBe(2)
+  }, 15_000)
 
   // Regression test for issue #189: pastVisits must follow MyChart's
   // LoadPast pagination (HasMoreData + SerializedIndex) rather than stopping

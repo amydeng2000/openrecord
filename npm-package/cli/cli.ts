@@ -50,6 +50,7 @@ import { saveTotpSecret, loadTotpSecret } from './totpStore';
 import { myChartPasskeyLogin } from '../../scrapers/myChart/login';
 import { setupPasskey, listPasskeys, deletePasskey } from '../../scrapers/myChart/setupPasskey';
 import { savePasskeyCredential, loadPasskeyCredential } from './passkeyStore';
+import { passkeyLoginWithCounterRetry } from '../../scrapers/myChart/passkeyLoginRetry';
 import type { PasskeyCredential } from '../../scrapers/myChart/softwareAuthenticator';
 import { sendTelemetryEvent } from '../../shared/telemetry';
 import { checkForUpdate } from '../../shared/updateCheck';
@@ -308,15 +309,22 @@ async function login(creds: LoginCredentials): Promise<MyChartRequest | null> {
     // Passkey login
     if ('passkey' in creds) {
       console.log(`  Attempting passkey login for ${creds.hostname}...`);
-      const passkeyResult = await myChartPasskeyLogin({
-        hostname: creds.hostname,
-        credential: creds.passkey,
-        protocol: cliArgs.local ? 'http' : undefined,
-      });
+      // MyChart enforces a strictly-increasing WebAuthn signature counter. Our
+      // stored counter can lag the server's, which rejects the first attempt;
+      // passkeyLoginWithCounterRetry bumps and retries to recover.
+      const passkeyResult = await passkeyLoginWithCounterRetry(
+        (credential) => myChartPasskeyLogin({
+          hostname: creds.hostname,
+          credential,
+          protocol: cliArgs.local ? 'http' : undefined,
+        }),
+        creds.passkey,
+      );
 
       if (passkeyResult.state === 'logged_in') {
         console.log('  Passkey login successful!');
-        // Save updated credential (incremented sign counter)
+        // Persist the accepted (incremented) sign counter so the next login
+        // starts from the right place and doesn't have to retry.
         await savePasskeyCredential(creds.hostname, creds.passkey);
         await saveCachedSession(creds.hostname, passkeyResult.mychartRequest);
         return passkeyResult.mychartRequest;

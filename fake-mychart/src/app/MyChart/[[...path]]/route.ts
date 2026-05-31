@@ -88,6 +88,22 @@ function buildPastVisitsPage(serializedIndex: string | null) {
 }
 
 /**
+ * Extract the WebAuthn signature counter from a base64 `authenticatorData`.
+ * Layout: rpIdHash (32 bytes) || flags (1 byte) || signCount (4 bytes, BE).
+ * Returns null if the data is missing or too short to contain a counter.
+ */
+function parseSignCount(authenticatorDataB64: string | undefined): number | null {
+  if (!authenticatorDataB64) return null;
+  try {
+    const buf = Buffer.from(authenticatorDataB64, 'base64');
+    if (buf.length < 37) return null;
+    return buf.readUInt32BE(33);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Build the public base URL from forwarded headers, so redirects
  * use the external domain rather than the container's localhost.
  */
@@ -377,9 +393,24 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         const creds = loginInfo.Credentials;
         const matchedUser = findUserByPasskey(creds.rawId);
         if (matchedUser || acceptAny()) {
-          if (matchedUser) {
-            const pk = matchedUser.passkeys.find(p => p.rawId === creds.rawId);
-            if (pk) pk.lastUsedInstant = new Date().toISOString();
+          const pk = matchedUser?.passkeys.find(p => p.rawId === creds.rawId);
+          if (pk) {
+            // Enforce the WebAuthn signature-counter rule like real MyChart.
+            // Per WebAuthn §6.1.1: when the counter is in use (presented or
+            // stored value is non-zero) each assertion must present a counter
+            // strictly greater than the last one accepted — otherwise the
+            // credential is replayed/stale/cloned and we reject it. When both
+            // are 0 the authenticator doesn't implement a counter (e.g. some
+            // platform authenticators), so we accept without enforcing. The
+            // counter lives at byte offset 33 (after the 32-byte rpIdHash + 1
+            // flags byte) of authenticatorData, big-endian.
+            const presented = parseSignCount(creds.authenticatorAssertion?.authenticatorData);
+            const usesCounter = (presented ?? 0) !== 0 || pk.signCount !== 0;
+            if (usesCounter && (presented === null || presented <= pk.signCount)) {
+              return html(doLoginFailed());
+            }
+            pk.signCount = Math.max(pk.signCount, presented ?? 0);
+            pk.lastUsedInstant = new Date().toISOString();
           }
           const sessionId = createSession(matchedUser?.username ?? null);
           const response = requireTerms()
@@ -944,6 +975,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         createdOnDevice: 'Software Authenticator',
         creationInstant: new Date().toISOString(),
         lastUsedInstant: null,
+        signCount: 0,
       };
       u.passkeys.push(newPasskey);
       return json({ success: true, data: newPasskey });
