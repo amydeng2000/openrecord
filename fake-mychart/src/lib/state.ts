@@ -14,6 +14,11 @@ export type Passkey = {
   createdOnDevice: string;
   creationInstant: string;
   lastUsedInstant: string | null;
+  // Highest WebAuthn signature counter the server has accepted for this
+  // credential. Real MyChart (like any WebAuthn RP) requires each assertion's
+  // counter to be strictly greater than this; we mirror that to catch
+  // client/server counter desync. 0 = no assertion accepted yet.
+  signCount: number;
 };
 
 export type FakeUserProfile = {
