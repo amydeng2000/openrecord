@@ -572,9 +572,11 @@ function fakePastVisit(
   };
 }
 
-// Filler past visits (newest→oldest), all within ~2 years so they fall inside
-// the default scrape window. Combined with the 3 detailed visits below this
-// gives 12 total → 3 pages at the route's page size of 5.
+// Filler past visits (newest→oldest). Combined with the 3 detailed visits
+// below, this gives 22 total → 3 pages at the route's real-MyChart page size
+// of 10 (10 + 10 + 2), so the scraper's pagination loop must follow the
+// `serializedIndex` continuation through several requests, not just one extra.
+// CSN-HOMER-023 (the oldest) is only reachable on the third page.
 const EXTRA_PAST_VISITS = [
   fakePastVisit('CSN-HOMER-005', '06/15/2025 09:00:00 AM', 'Office Visit', 'Julius Hibbert, MD'),
   fakePastVisit('CSN-HOMER-006', '04/02/2025 11:30:00 AM', 'Telephone', 'Julius Hibbert, MD'),
@@ -585,6 +587,16 @@ const EXTRA_PAST_VISITS = [
   fakePastVisit('CSN-HOMER-011', '09/15/2024 01:00:00 PM', 'Office Visit', 'Julius Hibbert, MD'),
   fakePastVisit('CSN-HOMER-012', '08/20/2024 09:45:00 AM', 'Telephone', 'Julius Hibbert, MD'),
   fakePastVisit('CSN-HOMER-013', '07/10/2024 12:00:00 PM', 'Office Visit', 'Julius Hibbert, MD'),
+  fakePastVisit('CSN-HOMER-014', '05/22/2024 10:30:00 AM', 'Office Visit', 'Julius Hibbert, MD'),
+  fakePastVisit('CSN-HOMER-015', '03/14/2024 09:15:00 AM', 'Procedure', 'Nick Riviera, MD'),
+  fakePastVisit('CSN-HOMER-016', '01/30/2024 02:45:00 PM', 'Telephone', 'Julius Hibbert, MD'),
+  fakePastVisit('CSN-HOMER-017', '11/08/2023 11:00:00 AM', 'Office Visit', 'Julius Hibbert, MD'),
+  fakePastVisit('CSN-HOMER-018', '09/19/2023 08:45:00 AM', 'Lab Work', 'Julius Hibbert, MD'),
+  fakePastVisit('CSN-HOMER-019', '07/06/2023 01:30:00 PM', 'Office Visit', 'Nick Riviera, MD'),
+  fakePastVisit('CSN-HOMER-020', '04/25/2023 10:00:00 AM', 'Office Visit', 'Julius Hibbert, MD'),
+  fakePastVisit('CSN-HOMER-021', '02/11/2023 03:15:00 PM', 'Telephone', 'Julius Hibbert, MD'),
+  fakePastVisit('CSN-HOMER-022', '12/02/2022 09:30:00 AM', 'Office Visit', 'Julius Hibbert, MD'),
+  fakePastVisit('CSN-HOMER-023', '08/15/2022 11:45:00 AM', 'Annual Physical', 'Julius Hibbert, MD'),
 ];
 
 export const pastVisits = {

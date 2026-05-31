@@ -295,24 +295,26 @@ describe('fake-mychart integration', () => {
 
   // Regression test for issue #189: pastVisits must follow MyChart's
   // LoadPast pagination (HasMoreData + SerializedIndex) rather than stopping
-  // after the first page. The fake serves 12 visits at a page size of 5, so a
-  // correct implementation walks 3 pages and returns all of them.
+  // after the first page. The fake serves 22 visits at the real MyChart page
+  // size of 10, so a correct implementation walks 3 pages and returns all of
+  // them. We pass a far-past cutoff so the date window never short-circuits the
+  // loop — this isolates the pagination behaviour and keeps the count stable
+  // regardless of when the test runs.
   it('pastVisits paginates past the first page and returns the full history', async () => {
-    const twoYearsAgo = new Date()
-    twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2)
-    const result = await pastVisits(session, twoYearsAgo)
+    const longAgo = new Date('2000-01-01T00:00:00Z')
+    const result = await pastVisits(session, longAgo)
 
     if ('error' in result) throw new Error(`pastVisits errored: ${result.error}`)
     expect(result.List).toBeDefined()
 
     const allVisits = Object.values(result.List).flatMap(org => org.List)
-    // 12 fixture visits — more than a single 5-visit page would yield.
-    expect(allVisits.length).toBe(12)
+    // 22 fixture visits — far more than a single 10-visit page would yield.
+    expect(allVisits.length).toBe(22)
 
-    // The oldest visit (CSN-HOMER-013, only reachable on page 3) confirms we
-    // didn't stop early at the first page of 5.
+    // The oldest visit (CSN-HOMER-023, only reachable on the third page)
+    // confirms we didn't stop early at the first or second page.
     const csns = allVisits.map(v => v.Csn)
-    expect(csns).toContain('CSN-HOMER-013')
+    expect(csns).toContain('CSN-HOMER-023')
 
     // No org should still be flagged as having more data once we've drained it.
     expect(Object.values(result.List).every(org => !org.HasMoreData)).toBe(true)

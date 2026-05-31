@@ -37,10 +37,11 @@ function joinPath(path: string[]): string {
   return path.join('/');
 }
 
-// How many past visits MyChart's LoadPast endpoint returns per page. Real
-// MyChart uses 10; we use a smaller page so the fixture (12 visits) spans
-// multiple pages and exercises the scraper's pagination loop.
-const PAST_VISITS_PAGE_SIZE = 5;
+// How many past visits MyChart's LoadPast endpoint returns per page. This MUST
+// match real MyChart exactly (10 per org per page) — the fake is a faithful
+// stand-in, not a convenience mock. The fixture carries more than one page of
+// visits so the scraper's pagination loop is still exercised.
+const PAST_VISITS_PAGE_SIZE = 10;
 
 /**
  * Mimic MyChart's paginated `Visits/VisitsList/LoadPast` response.
