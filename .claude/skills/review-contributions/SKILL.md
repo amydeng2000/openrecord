@@ -34,6 +34,12 @@ If `{{ target }}` is provided, review only that single PR/issue. Otherwise sweep
   file/line/command that proves it.
 - **Never leak PII** in a comment (no real patient data, names, MRNs, health details). This is a
   health-data project — see the PII rules in `CLAUDE.md`.
+- **Screen every submission for PHI/PII before anything else** (Step 2.5). Contributors sometimes
+  paste real screenshots, logs, lab values, credentials, or patient data into a PR diff, an issue
+  body, or an attachment. If you find any, **tell the submitter** immediately and clearly so it can
+  be removed/redacted, and flag it for the human (it may require history rewriting). When you
+  describe the problem in your comment, **do not quote the sensitive value back** — point to its
+  location instead.
 - **Be genuinely, warmly appreciative — always.** Someone took their own time to try to make this
   project better. Open *every* comment by sincerely thanking them for submitting the issue/PR, and
   mean it. This holds **even when** the issue turns out not to be real, the PR is wrong-direction,
@@ -123,6 +129,45 @@ hidden marker line so future runs can find it reliably:
 ```
 
 ---
+
+## Step 2.5 — Screen the submission for PHI/PII (do this first, for every item)
+
+Before judging an issue or PR on its merits, make sure the submission itself doesn't expose
+protected health information or personal data. This is a health-data project; a leaked screenshot
+or log can be a real privacy incident.
+
+Scan the **PR diff, the issue/PR body and edits, every comment, and any attachments/linked files**
+for:
+
+- Real **patient/health data** — names tied to conditions, MRNs, accession numbers, DOBs in a
+  health context, diagnoses, procedures, medications, lab values, provider names tied to real
+  patients, body parts/dates of real medical events.
+- **Credentials & secrets** — passwords, API keys, tokens (access/refresh/session), JWTs, TOTP
+  secrets, cookies, `.env` contents, connection strings.
+- **Personal identifiers** — real emails (not service/noreply), phone numbers, SSNs, addresses,
+  payment card numbers.
+- **Images** — patient-portal screenshots, medical images with patient metadata overlays.
+
+```bash
+gh pr diff <N> --repo "$REPO"                 # PR contents
+gh api "repos/$REPO/issues/<N>" --jq '.body'  # issue/PR body
+gh api "repos/$REPO/issues/<N>/comments" --jq '.[].body'
+```
+
+The repo's `pii-scan` skill describes what to look for in more detail — use the same lens. Be
+careful to distinguish **real** data from the project's intentional **fake** fixtures (e.g. the
+Homer/Marge `fake-mychart` test data, `homer`/`donuts123`, synthetic CLO images) — those are fine
+and expected. Only flag data that looks genuinely real.
+
+**If you find likely PHI/PII:**
+1. Comment on the PR/issue right away. Thank them, then explain — kindly and without alarm — that
+   the submission appears to contain real personal/health data, **point to where** (file + rough
+   location, or "the third screenshot"), and ask them to remove or redact it. **Never paste the
+   sensitive value into your comment.**
+2. Note that because git history persists, a maintainer may need to scrub it (force-push / squash /
+   purge the attachment), and that you've flagged it for them.
+3. Surface it at the **top** of your Step 6 summary as something needing the human's attention.
+4. You may still proceed to review the technical merits, but lead with the PHI/PII notice.
 
 ## Step 3 — Reviewing ISSUES: is this a *real* bug in the actual code?
 
@@ -295,6 +340,8 @@ After the sweep, print a concise summary table for the human running/scheduling 
 - Each PR/issue reviewed: number, author, type, your verdict (real-bug / not-real / good-PR /
   wrong-direction / needs-work / asked-questions), and whether you commented or pushed a fix.
 - Anything you deliberately **skipped** (insiders, drafts, already-reviewed-and-unchanged) and why.
+- **Any PHI/PII you flagged** (Step 2.5) — list these **first and most prominently**, since they
+  may need history scrubbing and a privacy response.
 - Anything that needs the **human's decision** (e.g. a borderline-direction PR, a merge call, a
   policy/licensing judgment) — call these out explicitly at the top.
 
