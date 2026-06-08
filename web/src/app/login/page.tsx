@@ -205,6 +205,9 @@ export default function LoginPage() {
   const [newsletterStatus, setNewsletterStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [newsletterName, setNewsletterName] = useState("");
   const [newsletterEmail, setNewsletterEmail] = useState("");
+  // Honeypot: hidden from real users, bots fill it in. Submissions with this set
+  // are silently dropped server-side.
+  const [newsletterCompany, setNewsletterCompany] = useState("");
   const timelineSectionRef = useRef<HTMLElement>(null);
 
   const isLoggedIn = !ctx.sessionLoading && !!ctx.user;
@@ -409,13 +412,18 @@ export default function LoginPage() {
 
     setNewsletterStatus("loading");
     try {
-      const res = await fetch("https://formspree.io/f/xvzlepwo", {
+      // Self-hosted newsletter sink: AWS Lambda (behind API Gateway) that logs
+      // each signup to CloudWatch. Replaces Formspree (quota-limited).
+      const endpoint =
+        process.env.NEXT_PUBLIC_NEWSLETTER_ENDPOINT ||
+        "https://a4443h7zdd.execute-api.us-east-2.amazonaws.com";
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Accept": "application/json"
         },
-        body: JSON.stringify({ name: newsletterName, email: newsletterEmail })
+        body: JSON.stringify({ name: newsletterName, email: newsletterEmail, company: newsletterCompany })
       });
 
       if (res.ok) {
@@ -646,6 +654,17 @@ export default function LoginPage() {
                       disabled={newsletterStatus === "loading"}
                     />
                   </div>
+                  {/* Honeypot: hidden from humans, bots fill it. Dropped server-side. */}
+                  <input
+                    type="text"
+                    name="company"
+                    tabIndex={-1}
+                    autoComplete="off"
+                    aria-hidden="true"
+                    value={newsletterCompany}
+                    onChange={(e) => setNewsletterCompany(e.target.value)}
+                    style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }}
+                  />
                   <Button
                     type="submit"
                     disabled={newsletterStatus === "loading"}
