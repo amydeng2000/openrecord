@@ -13,6 +13,18 @@
 import { describe, it, expect } from 'bun:test';
 import { parseTotpUri } from '../../../scrapers/myChart/totp';
 import { myChartUserPassLogin } from '../../../scrapers/myChart/login';
+import {
+  submitSignupRequest,
+  verifyActivationCode,
+  verifySignupContactCode,
+  createSignupCredentials,
+} from '../../../scrapers/myChart/signup';
+import {
+  getAccountRecoverySettings,
+  sendAccountRecoveryCode,
+  verifyAccountRecoveryCode,
+  resetAccountPassword,
+} from '../../../scrapers/myChart/accountRecovery';
 import { getImagingResults } from '../../../scrapers/myChart/labs_and_procedure_results/labResults';
 import { downloadImagingStudyDirect } from '../../../scrapers/myChart/eunity/imagingDirectDownload';
 import { convertCloToJpg } from '../../../scrapers/myChart/clo-image-parser/clo_to_jpg';
@@ -1493,6 +1505,121 @@ describe('hostname:username disambiguation', () => {
       method: 'DELETE',
     });
     expect(delRes.status).toBe(200);
+  });
+});
+
+// ===================================================================
+// 12b. Signup & account recovery (scraper-level, pre-auth onboarding)
+// ===================================================================
+//
+// Exercises the no-account / forgot-login onboarding branches (Vision
+// Implementation plan §7) against fake-mychart directly, the same way the
+// on-device app drives them. Self-contained: creates its own accounts with
+// unique emails/usernames so it doesn't disturb the seeded homer/marge state
+// other tests depend on.
+
+describe('Signup and account recovery', () => {
+  const SIGNUP_HOST = FAKE_MYCHART_HOST_URL;
+  const uniq = Date.now().toString(36);
+  const signupEmail = `signup-${uniq}@example.com`;
+  const signupUser = `signup_${uniq}`;
+  const recoverEmail = `recover-${uniq}@example.com`;
+  const recoverUser = `recover_${uniq}`;
+
+  it('self-signup creates a usable account after email verification', async () => {
+    const sr = await submitSignupRequest({
+      hostname: SIGNUP_HOST,
+      protocol: 'http',
+      identity: {
+        firstName: 'Test', lastName: 'Signup', dateOfBirth: '01/01/1980',
+        email: signupEmail, gender: 'Unknown',
+        address: { street: '1 Test St', city: 'Denver', state: '6', zip: '80204' },
+      },
+    });
+    expect(sr.state).toBe('need_contact_verification');
+
+    const cv = await verifySignupContactCode({
+      mychartRequest: sr.mychartRequest, signupToken: sr.signupToken!, code: '123456',
+    });
+    expect(cv.state).toBe('verified');
+
+    const ca = await createSignupCredentials({
+      mychartRequest: sr.mychartRequest, signupToken: sr.signupToken!,
+      username: signupUser, password: 'Sup3rSecret!',
+    });
+    expect(ca.state).toBe('created');
+
+    const login = await myChartUserPassLogin({
+      hostname: SIGNUP_HOST, user: signupUser, pass: 'Sup3rSecret!', protocol: 'http',
+    });
+    expect(login.state).toBe('logged_in');
+  });
+
+  it('self-signup rejects an email that already has an account', async () => {
+    const sr = await submitSignupRequest({
+      hostname: SIGNUP_HOST,
+      protocol: 'http',
+      identity: {
+        firstName: 'Homer', lastName: 'Simpson', dateOfBirth: '05/12/1956',
+        email: 'homer@springfield.net', gender: 'Male',
+        address: { street: '742 Evergreen Terrace', city: 'Springfield', state: '6', zip: '80204' },
+      },
+    });
+    expect(sr.state).toBe('account_exists');
+  });
+
+  it('valid activation code creates an account', async () => {
+    const act = await verifyActivationCode({
+      hostname: SIGNUP_HOST, code: 'ABCDE-FGHIJ-KLMNO', protocol: 'http',
+    });
+    expect(act.state).toBe('valid');
+    const ca = await createSignupCredentials({
+      mychartRequest: act.mychartRequest, signupToken: act.signupToken!,
+      username: `activate_${uniq}`, password: 'Eatmyshorts1!',
+    });
+    expect(ca.state).toBe('created');
+  });
+
+  it('invalid activation code is rejected', async () => {
+    const act = await verifyActivationCode({
+      hostname: SIGNUP_HOST, code: 'ZZZZZ-ZZZZZ-ZZZZZ', protocol: 'http',
+    });
+    expect(act.state).toBe('invalid');
+  });
+
+  it('account recovery resets the password and reveals the username for a fresh account', async () => {
+    // Create a throwaway account so recovery doesn't mutate seeded users.
+    const sr = await submitSignupRequest({
+      hostname: SIGNUP_HOST,
+      protocol: 'http',
+      identity: {
+        firstName: 'Test', lastName: 'Recover', dateOfBirth: '02/02/1990',
+        email: recoverEmail, gender: 'Unknown',
+        address: { street: '2 Test St', city: 'Denver', state: '6', zip: '80204' },
+      },
+    });
+    await verifySignupContactCode({ mychartRequest: sr.mychartRequest, signupToken: sr.signupToken!, code: '123456' });
+    await createSignupCredentials({
+      mychartRequest: sr.mychartRequest, signupToken: sr.signupToken!,
+      username: recoverUser, password: 'OldPassw0rd!',
+    });
+
+    // Now recover it.
+    const rs = await getAccountRecoverySettings({ hostname: SIGNUP_HOST, contactInfo: recoverEmail, protocol: 'http' });
+    expect(rs.settings?.allowEmail).toBe(true);
+
+    const send = await sendAccountRecoveryCode({ mychartRequest: rs.mychartRequest, contactInfo: recoverEmail });
+    expect(send.state).toBe('sent');
+
+    const vr = await verifyAccountRecoveryCode({ mychartRequest: rs.mychartRequest, contactInfo: recoverEmail, code: '123456' });
+    expect(vr.state).toBe('verified');
+    expect(vr.username).toBe(recoverUser.toLowerCase());
+
+    const reset = await resetAccountPassword({ mychartRequest: rs.mychartRequest, recoveryToken: vr.recoveryToken!, newPassword: 'BrandN3wPass!' });
+    expect(reset.state).toBe('reset');
+
+    const login = await myChartUserPassLogin({ hostname: SIGNUP_HOST, user: recoverUser, pass: 'BrandN3wPass!', protocol: 'http' });
+    expect(login.state).toBe('logged_in');
   });
 });
 

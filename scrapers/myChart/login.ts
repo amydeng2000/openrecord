@@ -132,7 +132,7 @@ export async function extractFirstPathPartFromMarketingPage(mychartRequest: MyCh
   }
 }
 
-async function determineFirstPathPart(mychartRequest: MyChartRequest): Promise<MyChartRequest | null> {
+export async function determineFirstPathPart(mychartRequest: MyChartRequest): Promise<MyChartRequest | null> {
 
   if (mychartRequest.firstPathPart) {
     logger.debug('first path part already determined', mychartRequest.firstPathPart)
