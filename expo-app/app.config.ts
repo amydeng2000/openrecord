@@ -20,6 +20,40 @@ const googleSigninPlugin: [string, { iosUrlScheme: string }] = [
   { iosUrlScheme },
 ];
 
+// E2E test builds (Maestro / Playwright) talk to local servers over plain
+// HTTP (fake-mychart + the mock AI backend), which release builds block by
+// default on both platforms. EXPO_PUBLIC_E2E=1 is only ever set by the test
+// tooling, so production builds keep the strict transport security defaults.
+const isE2eBuild = process.env.EXPO_PUBLIC_E2E === "1";
+
+const e2ePlugins: (string | [string, object])[] = isE2eBuild
+  ? [
+      [
+        "expo-build-properties",
+        {
+          android: { usesCleartextTraffic: true },
+          ios: {
+            // GoogleSignIn's AppCheckCore imports these from Swift; as
+            // static libraries they need module maps or pod install fails.
+            extraPods: [
+              { name: "GoogleUtilities", modular_headers: true },
+              { name: "RecaptchaInterop", modular_headers: true },
+            ],
+          },
+        },
+      ],
+    ]
+  : [];
+
+const e2eInfoPlist = isE2eBuild
+  ? {
+      NSAppTransportSecurity: {
+        NSAllowsArbitraryLoads: true,
+        NSAllowsLocalNetworking: true,
+      },
+    }
+  : {};
+
 const config: ExpoConfig = {
   name: "OpenRecord",
   slug: "openrecord",
@@ -41,6 +75,7 @@ const config: ExpoConfig = {
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
       NSFaceIDUsageDescription: "OpenRecord uses Face ID to protect your health data.",
+      ...e2eInfoPlist,
     },
   },
   android: {
@@ -58,6 +93,7 @@ const config: ExpoConfig = {
     "expo-font",
     "expo-local-authentication",
     googleSigninPlugin,
+    ...e2ePlugins,
   ],
   extra: {
     eas: {

@@ -7,6 +7,7 @@
  * On iOS, passes raw `fetch` to scrapers so iOS handles cookies natively
  * via NSHTTPCookieStorage (no tough-cookie needed).
  */
+import { Platform } from "react-native";
 import { MyChartRequest } from "../../../../scrapers/myChart/myChartRequest";
 import {
   myChartUserPassLogin,
@@ -57,8 +58,14 @@ import { putImageAttachment } from "@/lib/imaging/attachment-store";
 /**
  * On React Native, use raw fetch — iOS handles cookies natively.
  * This bypasses the tough-cookie layer entirely.
+ * On web, cross-origin cookies (the MyChart session) only stick when the
+ * request opts into credentials, so include them there.
  */
-const nativeFetch = (url: string, init: RequestInit) => fetch(url, init);
+const nativeFetch = (url: string, init: RequestInit) =>
+  fetch(
+    url,
+    Platform.OS === "web" ? { ...init, credentials: "include" as const } : init,
+  );
 import {
   getMyChartAccounts,
   updateMyChartAccount,

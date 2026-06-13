@@ -192,7 +192,7 @@ export default function ChatScreen() {
             <Text style={styles.menuIcon}>≡</Text>
           </Pressable>
           <Text style={styles.headerTitle}>OpenRecord</Text>
-          <Pressable onPress={handleNewChat} hitSlop={10}>
+          <Pressable testID="new-chat" accessibilityLabel="New chat" onPress={handleNewChat} hitSlop={10}>
             <Text style={styles.newChat}>New</Text>
           </Pressable>
         </View>

@@ -134,7 +134,7 @@ export default function SettingsScreen() {
     <SafeAreaView style={styles.safe}>
       <ScrollView style={styles.scroll}>
         <View style={styles.header}>
-          <Pressable onPress={() => router.back()} hitSlop={10}>
+          <Pressable testID="settings-back" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10}>
             <Text style={styles.back}>‹ Back</Text>
           </Pressable>
           <Text style={styles.headerTitle}>Settings</Text>
@@ -255,7 +255,7 @@ export default function SettingsScreen() {
         {/* AI Settings */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>AI</Text>
-          <Pressable style={styles.navRow} onPress={() => router.push("/settings/ai")}>
+          <Pressable testID="settings-ai-provider" accessibilityLabel="AI Provider" style={styles.navRow} onPress={() => router.push("/settings/ai")}>
             <View style={{ flex: 1 }}>
               <Text style={styles.navTitle}>AI Provider</Text>
               <Text style={styles.navSubtitle}>{providerLabel[aiProvider]}</Text>

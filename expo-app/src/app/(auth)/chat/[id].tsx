@@ -175,7 +175,7 @@ export default function ChatDetailScreen() {
             <Text style={styles.menuIcon}>≡</Text>
           </Pressable>
           <Text style={styles.headerTitle}>Chat</Text>
-          <Pressable onPress={() => router.replace("/(auth)")} hitSlop={10}>
+          <Pressable testID="new-chat" accessibilityLabel="New chat" onPress={() => router.replace("/(auth)")} hitSlop={10}>
             <Text style={styles.newChat}>New</Text>
           </Pressable>
         </View>

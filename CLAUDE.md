@@ -56,6 +56,20 @@ End-to-end tests in `tests/integration/ci/` that exercise the full user journey 
 
 **Database access**: PostgreSQL is exposed on host port 5433 (mapped from container port 5432) so integration tests can query the DB directly (e.g., to extract password reset tokens from the `verification` table). Connection string: `postgresql://testuser:testpass@localhost:5433/mychart_test` (override with `CI_DATABASE_URL` env var).
 
+## Expo App Tests (unit + E2E)
+
+The mobile app (`expo-app/`) has three layers of tests:
+
+**Unit tests** (`expo-app/src/lib/**/__tests__/*.test.ts`) — run with `bun test` via the root `bun run test:unit` globs. Native modules (`expo-secure-store`, `expo-sqlite`, `react-native`, `expo-constants`) are mocked with `mock.module()` + dynamic `await import(...)` (static imports hoist above the mocks). `database.test.ts` backs the expo-sqlite API with `bun:sqlite` so the real SQL runs against a real engine. The `@/` path alias works in bun because `expo-app/tsconfig.json` sets `baseUrl`.
+
+**Maestro E2E** (`expo-app/e2e/flows/*.yaml`) — drives the real app on an iOS simulator or Android emulator against a local fake-mychart (`localhost:4000`) and a deterministic mock AI backend (`expo-app/e2e/mock-ai-server.ts`, port 4600). Run locally with `expo-app/e2e/run.sh ios` (or `android`; add `--skip-build` to reuse a build). Flows cover: onboarding (homer, no 2FA), chat through the full tool loop (scripted model → on-device scraper → reply), history/drawer/search, settings, alerts (refill alert + ignore), and a second onboarding with marge (TOTP `123456`) + real passkey registration.
+
+**Web E2E (Playwright)** (`expo-app/e2e/web/`) — the app exported to web (`bun run export` in `e2e/web`, wraps `expo export --platform web`) and tested in Chromium. Browser scraping of fake-mychart works because (a) `FAKE_MYCHART_CORS=true` enables a CORS proxy in the fake (off by default — real MyChart sends no CORS headers), and (b) the session manager fetches with `credentials: "include"` on web. Metro maps native modules to `src/lib/shims/*.web.ts` (localStorage-backed storage, no-op biometrics) for the web platform. Run with `cd expo-app/e2e/web && bun install && bunx playwright test` (Playwright's `webServer` brings up the static server, mock AI, and fake-mychart).
+
+**E2E build flag**: `EXPO_PUBLIC_E2E=1` (inlined at bundle time) unlocks the Google-skip button outside dev builds, writes a fake backend session on skip so the free-tier AI path hits the mock server, and adds local-HTTP transport exceptions (iOS ATS / Android cleartext) via `app.config.ts`. Production builds never set it. `EXPO_PUBLIC_BACKEND_URL` points the app at the mock AI server.
+
+CI runs the web E2E on every PR (`expo-web-e2e` in `checks.yml` — fast, no native build). The iOS/Android Maestro jobs live in `.github/workflows/mobile-e2e.yml` and are **manual-trigger only** (workflow_dispatch) because they need full native builds (~30-45 min). Known issue: Release simulator builds currently launch to a blank screen (React renders no views despite JS executing) — use `expo run:ios` (Debug + Metro) or the web export until that's root-caused. Note: the expo app must stay on Expo SDK 55's supported react-native version (currently 0.83.x) — RN 0.85 does not compile against SDK 55's iOS native code (`expo install --fix` realigns).
+
 ## Reference Docs
 
 - **[CLI reference](docs/cli.md)** — Cookie caching, credential resolution, 2FA, CLI actions

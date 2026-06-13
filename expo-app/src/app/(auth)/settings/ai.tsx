@@ -76,7 +76,7 @@ export default function AiSettings() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()}>
+        <Pressable testID="ai-settings-back" accessibilityLabel="Back to Settings" onPress={() => router.back()}>
           <Text style={styles.back}>‹ Settings</Text>
         </Pressable>
         <Text style={styles.headerTitle}>AI Provider</Text>

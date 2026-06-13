@@ -188,6 +188,8 @@ export function LeftDrawer({ visible, onOpen, onClose, currentChatId, onNewChat 
             </Pressable>
 
             <TextInput
+              testID="drawer-search"
+              accessibilityLabel="Search chats"
               style={styles.search}
               placeholder="Search"
               placeholderTextColor="#999"
@@ -210,6 +212,8 @@ export function LeftDrawer({ visible, onOpen, onClose, currentChatId, onNewChat 
             }
             renderItem={({ item }) => (
               <Pressable
+                testID={`chat-row-${item.id}`}
+                accessibilityLabel={item.title}
                 style={[
                   styles.chatRow,
                   item.id === currentChatId && styles.chatRowActive,
