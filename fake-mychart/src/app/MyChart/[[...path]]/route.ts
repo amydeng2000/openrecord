@@ -539,9 +539,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return json(homer.healthSummaryHeader);
   }
 
-  // Vitals / Flowsheets
+  // Vitals / Flowsheets — two-call contract (definitions, then readings)
   if (lower === 'api/track-my-health/getflowsheets') {
     return json(homer.vitals);
+  }
+  if (lower === 'api/track-my-health/getflowsheetreadings') {
+    return json(homer.vitalsReadings);
   }
 
   // Medical History
