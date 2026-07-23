@@ -11,11 +11,17 @@
  * code to appear in $TWOFA_CODE_FILE, then completes the flow. The session is
  * cached to .cookie-cache/<host>.json so later runs skip login + 2FA entirely.
  *
+ * TOTP (unattended): if a TOTP secret is available — via $MYCHART_TOTP_SECRET or
+ * .totp-secrets/<host>.txt (written by `cli ... --set-up-totp`) — the script
+ * generates the 6-digit code itself, skips the SMS/email SendCode, and never
+ * waits on $TWOFA_CODE_FILE. This is what lets a daily job run with no human.
+ *
  * NOTHING here is committed; output is PHI and lives outside the repo.
  */
 import * as fs from 'fs';
 import * as path from 'path';
 import { myChartUserPassLogin, complete2faFlow, areCookiesValid } from './scrapers/myChart/login';
+import { generateTotpCode } from './scrapers/myChart/totp';
 import { MyChartRequest } from './scrapers/myChart/myChartRequest';
 
 import { getMyChartProfile, getEmail } from './scrapers/myChart/profile';
@@ -53,6 +59,21 @@ const OUT_DIR = process.env.OUT_DIR || path.join(process.cwd(), 'scrape-output')
 const CACHE_DIR = path.join(process.cwd(), '.cookie-cache');
 const CODE_FILE = process.env.TWOFA_CODE_FILE || path.join(process.cwd(), '.2fa-code');
 const CODE_WAIT_SEC = Number(process.env.TWOFA_WAIT_SEC || 300);
+// Directory holding per-host TOTP secrets written by `cli ... --set-up-totp`.
+const TOTP_DIR = process.env.MYCHART_TOTP_DIR || path.join(process.cwd(), '.totp-secrets');
+
+// Resolve a TOTP secret for this host: $MYCHART_TOTP_SECRET wins (used by CI),
+// otherwise fall back to .totp-secrets/<host>.txt. Returns null when neither is
+// present, which keeps the interactive SMS/email 2FA path in effect.
+function loadTotpSecret(): string | null {
+  if (process.env.MYCHART_TOTP_SECRET) return process.env.MYCHART_TOTP_SECRET.trim();
+  const p = path.join(TOTP_DIR, `${HOST}.txt`);
+  if (fs.existsSync(p)) {
+    const s = fs.readFileSync(p, 'utf8').trim();
+    if (s) return s;
+  }
+  return null;
+}
 // Optional allowlist of category names to scrape (comma-separated); empty = all.
 const ONLY = (process.env.SCRAPE_ONLY || '')
   .split(',')
@@ -103,17 +124,25 @@ async function login(): Promise<MyChartRequest> {
   const cached = await loadCachedSession();
   if (cached) return cached;
 
+  const totpSecret = loadTotpSecret();
   console.log(`  Logging into ${HOST} as ${USER} ...`);
-  const res = await myChartUserPassLogin({ hostname: HOST, user: USER, pass: PASS });
+  // With a TOTP secret we skip SendCode (no SMS/email) and generate the code below.
+  const res = await myChartUserPassLogin({ hostname: HOST, user: USER, pass: PASS, skipSendCode: !!totpSecret });
   if (res.state === 'invalid_login') throw new Error('Invalid username or password.');
-  if (res.state === 'error') throw new Error(`Login error: ${(res as any).error}`);
+  if (res.state === 'error') throw new Error(`Login error: ${res.error}`);
 
-  let req = res.mychartRequest;
+  const req = res.mychartRequest;
   if (res.state === 'need_2fa') {
-    const d = (res as any).twoFaDelivery;
-    if (d) console.log(`  2FA code sent via ${d.method}${d.contact ? ` to ${d.contact}` : ''}`);
-    const code = await waitForCode();
-    const tfa = await complete2faFlow({ mychartRequest: req, twofaCodeArray: [{ code, score: 1 }] });
+    let code: string;
+    if (totpSecret) {
+      code = await generateTotpCode(totpSecret);
+      console.log('  Generated TOTP code locally (no phone needed).');
+    } else {
+      const d = res.twoFaDelivery;
+      if (d) console.log(`  2FA code sent via ${d.method}${d.contact ? ` to ${d.contact}` : ''}`);
+      code = await waitForCode();
+    }
+    const tfa = await complete2faFlow({ mychartRequest: req, twofaCodeArray: [{ code, score: 1 }], isTOTP: !!totpSecret });
     if (tfa.state === 'invalid_2fa') throw new Error('Invalid 2FA code.');
     console.log('  2FA complete.');
   }
