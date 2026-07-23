@@ -1,0 +1,84 @@
+name: Daily MyChart pull
+
+# Pulls the patient's MyChart records once a day and opens a PR in the private
+# treebiolab/data-backend repo. Auth is unattended via a stored TOTP secret.
+#
+# Behavior:
+#   - validation passes + data changed  -> open a PR in data-backend for review
+#   - validation passes + no change      -> do nothing
+#   - validation fails (empty/degraded)  -> job FAILS, no PR (GitHub emails you)
+#
+# Scheduled runs only fire from the default branch, so this starts running daily
+# once merged to main. Test it before then with the "Run workflow" button.
+
+on:
+  schedule:
+    - cron: '0 13 * * *'   # 13:00 UTC daily (~6am PT). Adjust as desired. Best-effort timing.
+  workflow_dispatch: {}
+
+concurrency:
+  group: daily-pull
+  cancel-in-progress: false
+
+permissions:
+  contents: read           # least privilege; cross-repo writes use DATA_BACKEND_TOKEN
+
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout openrecord (scraper code)
+        uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install scraper deps
+        run: bun install
+
+      - name: Checkout data-backend (private destination)
+        uses: actions/checkout@v4
+        with:
+          repository: treebiolab/data-backend
+          token: ${{ secrets.DATA_BACKEND_TOKEN }}
+          path: data-backend
+
+      - name: Pull records (TOTP login, no phone)
+        env:
+          # Names must match what scrape-dump.ts reads from process.env.
+          host: ${{ secrets.MYCHART_HOST }}
+          username: ${{ secrets.MYCHART_USERNAME }}
+          pw: ${{ secrets.MYCHART_PW }}
+          MYCHART_TOTP_SECRET: ${{ secrets.MYCHART_TOTP_SECRET }}
+        run: |
+          touch .env   # pull_records.py only checks that .env exists; creds come from env vars above
+          python3 pull_records.py --out ./data-backend/raw/mychart
+
+      - name: Validate pull (canary — fails the run on empty/degraded data)
+        run: python3 scripts/validate_pull.py ./data-backend
+
+      # Only reached when validation passed. Opens a PR if (and only if) the data changed.
+      - name: Open PR with the day's records
+        env:
+          GH_TOKEN: ${{ secrets.DATA_BACKEND_TOKEN }}
+        run: |
+          cd data-backend
+          git config user.name  "openrecord-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add raw/mychart/medications.json raw/mychart/vitals.json raw/mychart/lab_results.json
+          if git diff --cached --quiet; then
+            echo "No changes since last pull — nothing to open."
+            exit 0
+          fi
+          DATE="$(date -u +%F)"
+          BRANCH="pull/${DATE}-${{ github.run_number }}"
+          git checkout -b "$BRANCH"
+          git commit -m "Daily pull ${DATE}"
+          git push origin "$BRANCH"
+          gh pr create --repo treebiolab/data-backend --base main --head "$BRANCH" \
+            --title "Daily pull ${DATE}" \
+            --body "Automated daily MyChart pull for ${DATE}. Validation passed. Review the diff before merging."

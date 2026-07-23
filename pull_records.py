@@ -140,37 +140,30 @@ def main() -> None:
     if rc != 0:
         sys.exit(f"\nScraper exited with code {rc}. See the output above for the error.")
 
-    # Quick confirmation, including a spot-check that vitals now have readings.
+    # Post-scrape confirmation.
+    #
+    # IMPORTANT: never print scraped medical content here — no vitals readings,
+    # flowsheet names, or per-category record counts. This output can be captured
+    # in CI logs (e.g. the daily GitHub Action), so it must stay free of PHI. Only
+    # operational status is printed: how many categories succeeded, any parse
+    # errors, and the output path.
     summary_path = out_dir / "_summary.json"
-    print("\n" + "=" * 60)
     if summary_path.exists():
         summary = json.loads(summary_path.read_text())
         ok = [s for s in summary if s.get("status") == "ok"]
         print(f"Done: {len(ok)}/{len(summary)} categories succeeded.")
-        vitals_path = out_dir / "vitals.json"
-        if vitals_path.exists():
-            vitals = json.loads(vitals_path.read_text())
-            total = sum(len(f.get("readings", [])) for f in vitals) if isinstance(vitals, list) else 0
-            types = ", ".join(f"{f.get('name')} ({len(f.get('readings', []))})" for f in vitals) if isinstance(vitals, list) else ""
-            print(f"Vitals: {total} readings across [{types}]")
 
-    # Post-scrape: reshape the verbose dumps into a concise form. Only categories
-    # that were pulled AND have a registered parser are processed (here: just
-    # lab_results); vitals/medications pass through untouched. By default the raw
-    # lab_results.json is replaced so only the small parsed file remains. A parser
-    # error is reported but never fails the pull (raw data is already saved).
+    # Reshape the verbose dumps into a concise form. Only categories that were
+    # pulled AND have a registered parser are processed (here: just lab_results);
+    # vitals/medications pass through untouched. By default the raw lab_results.json
+    # is replaced so only the small parsed file remains. A parse error is reported
+    # (name only, no data) but never fails the pull — the raw data is already saved.
     results = run_parsers(out_dir, categories=only, replace_raw=not args.keep_raw)
-    if results:
-        print("\nParsed:")
-        for row in results:
-            if row["status"] == "ok":
-                print(f"  ✓ {row['category']:<18} {row['records']} records "
-                      f"({row['bytes'] / 1024:.0f} KB) → {pathlib.Path(row['path']).name}")
-            else:
-                print(f"  ✗ {row['category']:<18} parse error: {row['error']}")
+    for row in results or []:
+        if row["status"] != "ok":
+            print(f"  parse error [{row['category']}]: {row['error']}")
 
-    print(f"\nJSON files are in: {out_dir}")
-    print("=" * 60)
+    print(f"JSON files are in: {out_dir}")
 
 
 if __name__ == "__main__":
