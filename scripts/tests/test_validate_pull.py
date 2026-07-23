@@ -29,7 +29,11 @@ def init_repo(repo):
 def write_files(repo, meds, vitals_readings, labs):
     d = repo / "raw" / "mychart"
     d.mkdir(parents=True, exist_ok=True)
-    (d / "medications.json").write_text(json.dumps([{"n": i} for i in range(meds)]))
+    # medications.json is an OBJECT { medications: [...], patientFirstName }, matching
+    # what getMedications returns — NOT a bare array.
+    (d / "medications.json").write_text(
+        json.dumps({"medications": [{"name": f"med{i}"} for i in range(meds)], "patientFirstName": "Test"})
+    )
     (d / "vitals.json").write_text(
         json.dumps([{"name": "flowsheet", "readings": [{"v": i} for i in range(vitals_readings)]}])
     )
@@ -55,6 +59,21 @@ class ValidatePullTest(unittest.TestCase):
         write_files(self.repo, meds=5, vitals_readings=10, labs=8)
         r = run_validate(self.repo)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_medications_object_shape_not_flagged_empty(self):
+        # Regression: medications.json is an object with a nested "medications"
+        # array; the validator must count the array, not treat the object as empty.
+        write_files(self.repo, meds=18, vitals_readings=10, labs=8)
+        r = run_validate(self.repo)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("medications: ok", r.stdout)
+        self.assertIn("records=18", r.stdout)
+
+    def test_empty_medications_fails(self):
+        write_files(self.repo, meds=0, vitals_readings=10, labs=8)
+        r = run_validate(self.repo)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("medications", r.stdout)
 
     def test_empty_vitals_fails(self):
         write_files(self.repo, meds=5, vitals_readings=0, labs=8)
