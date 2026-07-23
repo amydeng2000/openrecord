@@ -36,11 +36,22 @@ DROP_THRESHOLD = 0.5
 
 
 def count_records(category, data):
-    """Record count for a category. vitals = total readings across flowsheets."""
+    """Record count for a category, tolerant of each category's JSON shape.
+
+    - vitals: a list of flowsheets, each with a "readings" array -> total readings.
+    - medications: an object { "medications": [...], "patientFirstName": ... }
+      (getMedications returns this shape, NOT a bare array).
+    - lab_results (and anything else): a plain array of records.
+    """
     if category == "vitals":
         if not isinstance(data, list):
             return 0
         return sum(len(f.get("readings", [])) for f in data if isinstance(f, dict))
+    if category == "medications":
+        if isinstance(data, dict):
+            meds = data.get("medications")
+            return len(meds) if isinstance(meds, list) else 0
+        return len(data) if isinstance(data, list) else 0
     return len(data) if isinstance(data, list) else 0
 
 
